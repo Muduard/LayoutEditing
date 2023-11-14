@@ -1,0 +1,46 @@
+accelerate==0.24.1
+Brotli @ file:///tmp/abs_ecyw11_7ze/croots/recipe/brotli-split_1659616059936/work
+certifi==2023.7.22
+cffi @ file:///croot/cffi_1670423208954/work
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1666700638685/work
+contourpy==1.2.0
+cryptography @ file:///croot/cryptography_1694444244250/work
+cycler==0.12.1
+diffusers @ file:///home/conda/feedstock_root/build_artifacts/diffusers_1699454047668/work
+filelock @ file:///home/conda/feedstock_root/build_artifacts/filelock_1698714947081/work
+fonttools==4.44.0
+fsspec @ file:///home/conda/feedstock_root/build_artifacts/fsspec_1697919321618/work
+huggingface-hub==0.17.3
+idna @ file:///croot/idna_1666125576474/work
+importlib-metadata @ file:///home/conda/feedstock_root/build_artifacts/importlib-metadata_1688754491823/work
+importlib-resources==6.1.1
+kiwisolver==1.4.5
+matplotlib==3.8.1
+mkl-fft @ file:///croot/mkl_fft_1695058164594/work
+mkl-random @ file:///croot/mkl_random_1695059800811/work
+mkl-service==2.4.0
+numpy @ file:///croot/numpy_and_numpy_base_1695830428084/work/dist/numpy-1.26.0-cp39-cp39-linux_x86_64.whl#sha256=6c17acd1e1c4a5ebb5d14a2b7abe3d296469c0dd858a8b623abc1f4603184a9d
+opencv-python==4.8.1.78
+packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1696202382185/work
+Pillow @ file:///croot/pillow_1696580024257/work
+psutil==5.9.6
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyOpenSSL @ file:///croot/pyopenssl_1690223430423/work
+pyparsing==3.1.1
+PySocks @ file:///tmp/build/80754af9/pysocks_1605305812635/work
+python-dateutil==2.8.2
+PyYAML @ file:///home/conda/feedstock_root/build_artifacts/pyyaml_1648757097602/work
+regex @ file:///croot/regex_1696515298636/work
+requests @ file:///croot/requests_1690400202158/work
+safetensors @ file:///croot/safetensors_1697478848712/work
+six==1.16.0
+tokenizers==0.14.1
+torch==1.13.0
+torchaudio==0.13.0
+torchvision==0.14.0
+tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1691671248568/work
+transformers==4.35.0
+typing_extensions @ file:///croot/typing_extensions_1690297465030/work
+urllib3 @ file:///croot/urllib3_1698257533958/work
+zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1695255097490/work
