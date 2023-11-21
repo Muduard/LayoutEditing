@@ -7,9 +7,11 @@ from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_fr
 import cv2
 import argparse
 from accelerate import Accelerator
-accelerator = Accelerator()
-device = accelerator.device
-print(device)
+import numpy as np
+import torch.nn.functional as F
+
+from embedder_model import EmbedderModel
+device = "cuda:0"
 timesteps = 30
 
 GUIDANCE_SCALE = 7.5
@@ -44,7 +46,7 @@ controller = AttentionStore()#AttentionReplace(new_attn, token_numbers=[0])
 register_attention_control(pipe, controller)
 hr = cv2.resize(h, (args.res_size, args.res_size))
 cv2.imwrite(args.out_path + "hr.png", hr)
-ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float)
+ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float) / 255
 
 
 
@@ -53,7 +55,7 @@ timesteps = 30
 pipe.scheduler.set_timesteps(timesteps)
 batch_size = 1
 torch.manual_seed(42)
-noise = torch.randn((batch_size, 4, 64, 64), dtype=torch.float16, device=device)
+noise = torch.randn((batch_size, 4, 64, 64), dtype=torch.float16, device=device) 
 
 latents = noise
 
@@ -72,9 +74,12 @@ uncond_input = pipe.tokenizer(
         [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
 )
 uncond_embeddings = pipe.text_encoder(uncond_input.input_ids.to(device))[0]
-text_emb.retain_grad()
+
+delta_emb = torch.zeros_like(text_emb)
 #uncond_embeddings.retain_grad()
-context = [uncond_embeddings, text_emb]
+delta_emb.requires_grad_(True)
+#delta_emb.retain_grad()
+context = [uncond_embeddings, text_emb, delta_emb]
 guidance_scale = 7.5
 
 
@@ -84,41 +89,60 @@ lossF = torch.nn.BCELoss()#BCELoss()#MSELoss()
 latents.requires_grad = False
 
 
-#def opt_embed():
+em = EmbedderModel().to(dtype=torch.float16, device=device)
+em.train()
+
 step = 0
-optimizer = torch.optim.SGD([context[1]], args.lr)
-m = torch.nn.Sigmoid()
-ht = m(ht)
+optimizer = torch.optim.SGD(em.parameters(), args.lr)
+
 for t in tqdm(pipe.scheduler.timesteps):
     controller = AttentionStore()
     register_attention_control(pipe, controller)
-    if step < 20:
+    if step == 8:
         bar = tqdm(range(args.epochs))
         flag = True
+        
         for i in bar:
             
             controller = AttentionStore()
             register_attention_control(pipe, controller)
             optimizer.zero_grad()
-            latents2 = diffusion_step(pipe, controller, latents, context, t, guidance_scale)
+            pipe.unet.zero_grad()
+            latents2 = diffusion_step(pipe, controller, latents, context, t, guidance_scale, em, train = True)
+            
             attention_maps, out_save16 = get_cross_attention(prompts, controller, res=args.res_size, from_where=["up", "down"])
             attn = attention_maps[:, :, 5].to(dtype=torch.float)
             attention_maps = attention_maps.to(dtype=torch.float)
             #attn_replace = torch.clone(attention_maps)
             #attn_replace[:, :, 5] = ht
-            
+            save_attn = (attn / 2 + 0.5).clamp(0, 1)
+            save_attn = attn.detach().cpu().numpy()
+            save_attn = (save_attn * 255).astype(np.uint8)
+            plt.imshow(save_attn)
+            plt.show()
+            plt.savefig("loss_attn.png")
             loss = lossF(attn, ht)
             
-            accelerator.backward(loss, retain_graph=True)
-            if loss < 0.1:
+            #grad_emb = torch.autograd.grad(loss, [context[1]])[0]
+            #context[1] = context[1] - grad_emb
+            loss.backward()
+            if loss < 0.01:
                  break
             bar.set_description(f"loss: {loss.detach()}")
-                #loss.backward(retain_graph=True)
+           
             
-            optimizer.step()
+            #optimizer.step()
+
+            
+            save_attn = (ht / 2 + 0.5).clamp(0, 1)
+            save_attn = save_attn.detach().cpu().numpy()
+            save_attn = (save_attn * 255).astype(np.uint8)
+            plt.imshow(save_attn)
+            plt.show()
+            plt.savefig("ht.png")
             #ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float)
         
-    latents = diffusion_step(pipe, controller, latents, context, t, guidance_scale)
+    latents = diffusion_step(pipe, controller, latents, context, t, guidance_scale, em)
     step += 1
 
 def opt_zero():
