@@ -8,7 +8,6 @@ import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
 
-from torchviz import make_dot
 LOW_RESOURCE = True 
 class LocalBlend:
 
@@ -433,21 +432,20 @@ def show_cross_attention(pipe, prompts, attention_store: AttentionStore, res: in
 
 
 def diffusion_step(model, controller, latents, context, t, guidance_scale, em, train = False,low_resource=False):
-    #new_embed = context[1]
+    new_embed = context[1]
     if train:
-        new_embed = em(context[1])
-    #with torch.no_grad():
-    #noise_pred_uncond = model.unet(latents, t, encoder_hidden_states=context[0])["sample"]
-    
-    noise_prediction_text = model.unet(latents, t, encoder_hidden_states=context[1])["sample"]
-    '''with torch.no_grad():
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-
-        latents = model.scheduler.step(noise_pred, t, latents)["prev_sample"]
-        if controller != None:
-            latents = controller.step_callback(latents)'''
+        new_embed = context[1] + em(context[1])
     with torch.no_grad():
-        latents = model.scheduler.step(noise_prediction_text, t, latents)["prev_sample"]
+        noise_pred_uncond = model.unet(latents, t, encoder_hidden_states=context[0])["sample"]
+    
+    noise_prediction_text = model.unet(latents, t, encoder_hidden_states=new_embed)["sample"]
+    with torch.no_grad():
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+    
+    latents = model.scheduler.step(noise_prediction_text, t, latents)["prev_sample"]
+    if controller != None:
+        latents = controller.step_callback(latents)
+
     return latents
 
 def register_attention_control(model, controller):

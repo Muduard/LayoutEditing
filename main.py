@@ -93,8 +93,8 @@ em = EmbedderModel().to(dtype=torch.float16, device=device)
 em.train()
 
 step = 0
+#optimizer = torch.optim.SGD(em.parameters(), args.lr)
 optimizer = torch.optim.SGD(em.parameters(), args.lr)
-
 for t in tqdm(pipe.scheduler.timesteps):
     controller = AttentionStore()
     register_attention_control(pipe, controller)
@@ -125,13 +125,13 @@ for t in tqdm(pipe.scheduler.timesteps):
             
             #grad_emb = torch.autograd.grad(loss, [context[1]])[0]
             #context[1] = context[1] - grad_emb
-            loss.backward()
+            loss.backward(retain_graph=True)
             if loss < 0.01:
                  break
             bar.set_description(f"loss: {loss.detach()}")
            
             
-            #optimizer.step()
+            optimizer.step()
 
             
             save_attn = (ht / 2 + 0.5).clamp(0, 1)
