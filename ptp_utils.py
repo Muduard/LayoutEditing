@@ -7,6 +7,7 @@ import cv2
 import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
+from embedder_model import EmbedderModel
 
 LOW_RESOURCE = True 
 class LocalBlend:
@@ -270,6 +271,7 @@ class AttentionStore(AttentionControl):
         key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
         #if attn.shape[1] <= 32 ** 2:  # avoid memory overhead
         self.step_store[key].append(attn)
+
         return attn
 
     def between_steps(self):
@@ -334,7 +336,7 @@ def aggregate_attention(prompts, attention_store: AttentionStore, res: int, from
     out_save = out.copy()
     out = torch.cat(out, dim=0)
     out = out.sum(0) / out.shape[0]
-    return out.cpu(), out_save
+    return out, out_save
 
 @torch.no_grad()
 def latent2image(vae, latents):
@@ -421,7 +423,7 @@ def show_cross_attention(pipe, prompts, attention_store: AttentionStore, res: in
         image = attention_maps[:, :, i]
         image = 255 * image / image.max()
         image = image.unsqueeze(-1).expand(*image.shape, 3)
-        image = image.detach().numpy().astype(np.uint8)
+        image = image.cpu().detach().numpy().astype(np.uint8)
         image = np.array(Image.fromarray(image).resize((256, 256)))
         impil = Image.fromarray(image).resize((256, 256))
         impil.save(f"attentions/{decoder(int(tokens[i]))}.png")
@@ -431,31 +433,31 @@ def show_cross_attention(pipe, prompts, attention_store: AttentionStore, res: in
     view_images(np.stack(images, axis=0),file_path=out_path)
 
 
-def diffusion_step(model, controller, latents, context, t, guidance_scale, em, train = False,low_resource=False):
-    new_embed = context[1]
-    if train:
-        new_embed = context[1] + em(context[1])
+def diffusion_step(model, controller, latents, context, t, guidance_scale, train = False,low_resource=False):
+    model.unet.embed_proj = train
     with torch.no_grad():
         noise_pred_uncond = model.unet(latents, t, encoder_hidden_states=context[0])["sample"]
     
-    noise_prediction_text = model.unet(latents, t, encoder_hidden_states=new_embed)["sample"]
+    noise_prediction_text = model.unet(latents, t, encoder_hidden_states=context[1])["sample"]
+
     with torch.no_grad():
         noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+        latents = model.scheduler.step(noise_pred, t, latents)["prev_sample"]
+        if controller != None:
+            latents = controller.step_callback(latents)
     
-    latents = model.scheduler.step(noise_prediction_text, t, latents)["prev_sample"]
-    if controller != None:
-        latents = controller.step_callback(latents)
-
     return latents
 
 def register_attention_control(model, controller):
     def ca_forward(self, place_in_unet):
         to_out = self.to_out
+        
         if type(to_out) is torch.nn.modules.container.ModuleList:
             to_out = self.to_out[0]
         else:
             to_out = self.to_out
-
+        
+        self.emb_model = EmbedderModel().to(dtype=torch.float16, device="cuda:1")
         def reshape_heads_to_batch_dim(self, tensor):
             batch_size, seq_len, dim = tensor.shape
             head_size = self.heads
@@ -481,6 +483,9 @@ def register_attention_control(model, controller):
             q = self.to_q(x)
             is_cross = context is not None
             context = context if is_cross else x
+            
+            if is_cross and model.unet.embed_proj:
+                context = context + self.emb_model(context)
             k = self.to_k(context)
             v = self.to_v(context)
             q = reshape_heads_to_batch_dim(self, q)
@@ -545,10 +550,11 @@ def bw_hook(module, grad_input, grad_output):
     print('grad_output:', grad_output)
 
 def fw_hook(module, input, output):
-    w = module.to_v.weight
-    print(w.shape)
-    print(output[0].shape)
-    iw = torch.linalg.inv(w.to(torch.double))
+    W = module.to_out[0].weight
+    b = module.to_out[0].bias
+    reconstructed_input = torch.matmul((output - b).to(torch.float), torch.inverse(W.T.to(torch.float)))
+    print(reconstructed_input.shape)
+    print(output.shape)
 
 
 def register_hook(net_, count, place_in_unet, module_name=None):
