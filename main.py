@@ -47,12 +47,12 @@ controller = AttentionStore()
 register_attention_control(pipe, controller)
 hr = cv2.resize(h, (args.res_size, args.res_size))
 cv2.imwrite(args.out_path + "hr.png", hr)
-ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255
+ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 / 5
 
 
 
 prompts = ["Cat on table"]
-timesteps = 30
+timesteps = 20
 pipe.scheduler.set_timesteps(timesteps)
 batch_size = 1
 torch.manual_seed(42)
@@ -108,8 +108,9 @@ step = 0
 #with torch.autograd.detect_anomaly():
 for t in tqdm(pipe.scheduler.timesteps):
     
-    if  3 < step < 10:
-        bar = tqdm(range(args.epochs))
+    if  6 < step < 22:
+        nepochs = args.epochs if step==7 else args.epochs//100
+        bar = tqdm(range(nepochs))
         flag = True
         def grad_em(net_, count, place_in_unet, module_name=None):
             if module_name in ["emb_model"]:
@@ -123,6 +124,7 @@ for t in tqdm(pipe.scheduler.timesteps):
 
         grad_em(pipe.unet, 0, None)
         grad_params = list(filter(lambda p: p.requires_grad, pipe.unet.parameters()))
+        
         #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
         optimizer = torch.optim.SGD(grad_params, args.lr)
         for i in bar:
@@ -134,9 +136,9 @@ for t in tqdm(pipe.scheduler.timesteps):
             
             attention_maps = attention_maps.to(torch.float)
             attn_replace = torch.clone(attention_maps)
-            attn_replace[:, :, 5] = ht
-            attn = attention_maps[:, :, 5]
-            if (i+1) % 500 == 0:
+            attn_replace[:, :, 1] = ht
+            attn = attention_maps[:, :, 1]
+            if (i) % 500 == 0:
                 save_attn = (attn / 2 + 0.5).clamp(0, 1)
                 save_attn = attn.detach().cpu().numpy()
                 save_attn = (save_attn * 255).astype(np.uint8)
@@ -145,30 +147,38 @@ for t in tqdm(pipe.scheduler.timesteps):
                 plt.savefig("loss_attn.png")
             losses = []
             for j in range(attention_maps.shape[-1]):
-                #lamd = 1 
-                #if j == 5:
-                #    lamd = 25
-                l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
-                    + lossF(attention_maps[:,:,j] \
-                            / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j]  )
+                lamd = 0.1
+                if j == 1:
+                    lamd = 1.2
+                elif j == 0:
+                     lambd = 0.4
+                l = lamd * lossF(attention_maps[:,:,j],attn_replace[:,:,j]) #\
+                    #+ lossF(attention_maps[:,:,j] \
+                    #        / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j]  )
                 
                 losses.append(l)
             
+            #l1 = 0.4
+            #0.3 * lossF(attention_maps[:,:,0],ht) +
+            #loss =  1 * lossF(attention_maps[:,:,1],ht)
             loss = sum(losses)
             loss.backward()
             if loss < 0.01:
                 print(loss)
                 break
             bar.set_description(f"loss: {loss.detach()}")
-            for p in grad_params:
-                p.grad /= torch.linalg.norm(p, ord=np.inf)
+            #for p in grad_params:
+            #    p.grad /= torch.linalg.norm(p, ord=np.inf)
             optimizer.step()
             context[0] = context[0].detach()
             context[1] = context[1].detach()
             
         latents = latents2
-    with torch.no_grad():
-        latents = diffusion_step(pipe, controller, latents, context, t, guidance_scale, train=False)
+        
+    else:
+        with torch.no_grad():
+            latents = diffusion_step(pipe, controller, latents, context, t, guidance_scale, train=False)
+    
     step += 1
 
 def opt_zero():
@@ -177,8 +187,18 @@ def opt_zero():
             controller = AttentionStore()
             register_attention_control(pipe, controller)
 
+def save_net(net_, count, place_in_unet, module_name=None):
+            if module_name in ["emb_model"]:
+                torch.save(net_.state_dict(), f'net_{count}.pt')
+                count += 1
+                return count
+            elif hasattr(net_, 'children'):
+                for k, net__ in net_.named_children():
+                    count = save_net(net__, count, place_in_unet, module_name=k)
+
 
 image = latent2image(pipe.vae, latents)
 plt.imshow(image)
 plt.savefig(args.out_path + "image.png")
 show_cross_attention(pipe, prompts, controller, res=args.res_size, from_where=["up","down"], out_path=args.out_path + "attns.png")
+save_net(pipe.unet, 0, None)
