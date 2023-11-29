@@ -1,6 +1,6 @@
 import os 
 import torch
-from diffusers import DiffusionPipeline
+from diffusers import DiffusionPipeline, DDIMScheduler
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image
@@ -20,6 +20,9 @@ MAX_NUM_WORDS = 77
 repo_id =  "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 pipe = DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16).to(device)#DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16,use_safetensors=True).to(device)
+pipe.scheduler = DDIMScheduler.from_config(
+    pipe.scheduler.config
+)
 #pipe.enable_xformers_memory_efficient_attention()
 #pipe.unet = torch.nn.DataParallel(pipe.unet)
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
@@ -106,13 +109,7 @@ def reset_grad(a):
 step = 0
 
 #with torch.autograd.detect_anomaly():
-for t in tqdm(pipe.scheduler.timesteps):
-    
-    if  6 < step < 22:
-        nepochs = args.epochs if step==7 else args.epochs//100
-        bar = tqdm(range(nepochs))
-        flag = True
-        def grad_em(net_, count, place_in_unet, module_name=None):
+def grad_em(net_, count, place_in_unet, module_name=None):
             if module_name in ["emb_model"]:
                 for param in net_.parameters():
                     param.requires_grad = True
@@ -122,11 +119,16 @@ for t in tqdm(pipe.scheduler.timesteps):
                     grad_em(net__, count, place_in_unet, module_name=k)
         
 
-        grad_em(pipe.unet, 0, None)
-        grad_params = list(filter(lambda p: p.requires_grad, pipe.unet.parameters()))
-        
-        #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
-        optimizer = torch.optim.SGD(grad_params, args.lr)
+grad_em(pipe.unet, 0, None)
+grad_params = list(filter(lambda p: p.requires_grad, pipe.unet.parameters()))
+
+optimizer = torch.optim.SGD(grad_params, args.lr)
+for t in tqdm(pipe.scheduler.timesteps):
+    
+    if  1 < step < 10:
+        nepochs = args.epochs if step==7 else 30
+        bar = tqdm(range(nepochs))
+        flag = True
         for i in bar:
             controller.reset()
             optimizer.zero_grad()
@@ -147,20 +149,14 @@ for t in tqdm(pipe.scheduler.timesteps):
                 plt.savefig("loss_attn.png")
             losses = []
             for j in range(attention_maps.shape[-1]):
-                lamd = 0.1
-                if j == 1:
-                    lamd = 1.2
-                elif j == 0:
-                     lambd = 0.4
-                l = lamd * lossF(attention_maps[:,:,j],attn_replace[:,:,j]) #\
-                    #+ lossF(attention_maps[:,:,j] \
-                    #        / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j]  )
+                
+                l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
+                    + lossF(attention_maps[:,:,j] \
+                            / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j]  )
                 
                 losses.append(l)
             
-            #l1 = 0.4
-            #0.3 * lossF(attention_maps[:,:,0],ht) +
-            #loss =  1 * lossF(attention_maps[:,:,1],ht)
+            
             loss = sum(losses)
             loss.backward()
             if loss < 0.01:
