@@ -354,6 +354,7 @@ def get_multi_level_attention_from_average(average_attention, device):
     transform = transforms.Compose([
         transforms.ToTensor()
     ])
+    h8 = cv2.resize(average_attention, (8, 8))
     h16 = cv2.resize(average_attention, (16, 16))
     h32 = cv2.resize(average_attention, (32, 32))
     h64 = cv2.resize(average_attention, (64, 64))
@@ -364,20 +365,24 @@ def get_multi_level_attention_from_average(average_attention, device):
     image = cv2.bitwise_and(noise_h, average_attention)
     image32 = cv2.bitwise_and(noise_h32, h32)
     image64 = cv2.bitwise_and(noise_h64, h64)'''
-
-    image = h16
+    image8 = h8
+    image16 = h16
     image32 = h32
     image64 = h64
-    image_tensor = transform(image).to(dtype=torch.float16, device=device) / 10
-    image_tensor = image_tensor.repeat((8, 1, 1)).reshape(8, 256, 1)
 
-    image_tensor32 = transform(image32).to(dtype=torch.float16, device=device) / 10
+    image_tensor8 = transform(image8).to(dtype=torch.float16, device=device) / 255
+    image_tensor8 = image_tensor8.repeat((8, 1, 1)).reshape(8, 64, 1)
+
+    image_tensor16 = transform(image16).to(dtype=torch.float16, device=device) / 255
+    image_tensor16 = image_tensor16.repeat((8, 1, 1)).reshape(8, 256, 1)
+
+    image_tensor32 = transform(image32).to(dtype=torch.float16, device=device) / 255
     image_tensor32 = image_tensor32.repeat((8, 1, 1)).reshape(8, 1024, 1)
 
-    image_tensor64 = transform(image64).to(dtype=torch.float16, device=device) / 10
+    image_tensor64 = transform(image64).to(dtype=torch.float16, device=device) / 255
     image_tensor64 = image_tensor64.repeat((8, 1, 1)).reshape(8, 4096, 1)
 
-    attn_new = {'256': image_tensor, '1024': image_tensor32, '4096': image_tensor64}
+    attn_new = {'64': image_tensor8,'256': image_tensor16, '1024': image_tensor32, '4096': image_tensor64}
 
     return attn_new
 
@@ -413,9 +418,9 @@ def get_cross_attention(prompts, attention_store: AttentionStore, res: int, from
 
     return attention_maps, out_save
 
-def show_cross_attention(pipe, prompts, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0, out_path: str = "attns.png"):
-    tokens = pipe.tokenizer.encode(prompts[select])
-    decoder = pipe.tokenizer.decode
+def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0, out_path: str = "attns.png"):
+    tokens = tokenizer.encode(prompts[select])
+    decoder = tokenizer.decode
     attention_maps, out_save = aggregate_attention(prompts,attention_store, res, from_where, True, select)
 
     images = []
@@ -433,17 +438,16 @@ def show_cross_attention(pipe, prompts, attention_store: AttentionStore, res: in
     view_images(np.stack(images, axis=0),file_path=out_path)
 
 
-def diffusion_step(model, controller, latents, context, t, guidance_scale, train = False,low_resource=False):
-    model.unet.embed_proj = train
+def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, train = False,low_resource=False):
     
-    noise_pred_uncond = model.unet(latents, t, encoder_hidden_states=context[0])["sample"]
+    noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0])["sample"]
     
-    noise_prediction_text = model.unet(latents, t, encoder_hidden_states=context[1])["sample"]
+    noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1])["sample"]
     
     #with torch.no_grad():
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
     
-    latents = model.scheduler.step(noise_pred, t, latents)["prev_sample"]
+    latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
     
     if controller != None:
         latents = controller.step_callback(latents)
@@ -451,7 +455,7 @@ def diffusion_step(model, controller, latents, context, t, guidance_scale, train
     
     return latents
 
-def register_attention_control(model, controller):
+def register_attention_control(model, controller, attns = None):
     def ca_forward(self, place_in_unet):
         to_out = self.to_out
         
@@ -460,7 +464,7 @@ def register_attention_control(model, controller):
         else:
             to_out = self.to_out
         
-        self.emb_model = EmbedderModel().to(dtype=torch.float16, device="cuda:1")
+        #self.emb_model = EmbedderModel().to(dtype=torch.float16, device="cuda:1")
         def reshape_heads_to_batch_dim(self, tensor):
             batch_size, seq_len, dim = tensor.shape
             head_size = self.heads
@@ -487,8 +491,6 @@ def register_attention_control(model, controller):
             is_cross = context is not None
             context = context if is_cross else x
             
-            if is_cross and model.unet.embed_proj:
-                context = context + self.emb_model(context)
             k = self.to_k(context)
             v = self.to_v(context)
             q = reshape_heads_to_batch_dim(self, q)
@@ -503,9 +505,15 @@ def register_attention_control(model, controller):
                 mask = mask[:, None, :].repeat(h, 1, 1)
                 sim.masked_fill_(~mask, max_neg_value)
 
-            # attention, what we cannot get enough of
+            additional_attn = 0
             
-            attn = F.softmax(sim,dim=-1)
+            #pww
+            if attns != None:
+                w = 0.5 * sim.max()
+                additional_attn = attns[f'{sim.shape[1]}']
+
+            # attention, what we cannot get enough of
+            attn = F.softmax(sim + w * additional_attn,dim=-1)
             
             attn = controller(attn, is_cross, place_in_unet)
 
@@ -538,7 +546,7 @@ def register_attention_control(model, controller):
         return count
 
     cross_att_count = 0
-    sub_nets = model.unet.named_children()
+    sub_nets = model.named_children()
     for net in sub_nets:
         if "down" in net[0]:
             cross_att_count += register_recr(net[1], 0, "down")
