@@ -11,19 +11,12 @@ from accelerate import Accelerator
 import numpy as np
 import torch.nn.functional as F
 
-device = "cuda:0"
 
 
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 repo_id =  "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 #pipe = DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16).to(device)#DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16,use_safetensors=True).to(device)
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=torch.float16).to(device)
-tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=torch.float16)
-text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=torch.float16).to(device)
-unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=torch.float16).to(device)
-
-scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
 #pipe.enable_xformers_memory_efficient_attention()
 #pipe.unet = torch.nn.DataParallel(pipe.unet)
@@ -39,15 +32,28 @@ parser.add_argument('--lr', default=0.01, type=float,
 parser.add_argument('--epochs', default=70, type=int,
                     help='Optimization Epochs')
 parser.add_argument('--guide', action=argparse.BooleanOptionalAction)
+parser.add_argument('--cuda', default=-1, type=int,
+                    help='Cuda device to use')
 args = parser.parse_args()
 
 path_original = args.out_path + "original/"
 os.makedirs(args.out_path,exist_ok = True)
 os.makedirs(path_original,exist_ok = True)
 
+device = "cpu"
+if args.cuda > -1:
+     device = f'cuda:{args.cuda}'
+
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=torch.float16).to(device)
+tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=torch.float16)
+text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=torch.float16).to(device)
+unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=torch.float16).to(device)
+
+scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
 
 mask_index = 2
-
+timesteps = 50
 h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
 new_attn = get_multi_level_attention_from_average(h, device)
 
@@ -167,7 +173,7 @@ for t in tqdm(scheduler.timesteps):
         grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
         #grad_x[grad_x != grad_x] = 0
         #eta = 0.01
-        eta = 1
+        eta = 0.5
         latents = latents2 - eta * lambd[step] * grad_x
         latents = latents * theta[step] + latents_original * (1 - theta[step])
         latents = latents.detach()
