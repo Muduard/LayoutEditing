@@ -62,7 +62,7 @@ ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.flo
 
 
 prompts = ["A cat on a sofa"]
-timesteps = 70
+timesteps = 50
 scheduler.set_timesteps(timesteps)
 scheduler.timesteps = scheduler.timesteps.to(device)
 batch_size = 1
@@ -130,7 +130,7 @@ grad_em(pipe.unet, 0, None)'''
 #grad_params = list(filter(lambda p: p.requires_grad, pipe.unet.parameters()))
 #context.append(em)
 #optimizer = torch.optim.SGD(em.parameters(), args.lr)
-theta = torch.linspace(0.3, 1, timesteps//2)
+theta = torch.linspace(0.7, 1, timesteps//2)
 lambd = torch.linspace(1, 0, timesteps // 2)
 
 for t in tqdm(scheduler.timesteps):
@@ -142,6 +142,7 @@ for t in tqdm(scheduler.timesteps):
         #for i in bar:
         controller.reset()
         #optimizer.zero_grad()
+        latents = t * latents + (1 - t) * torch.randn_like(latents)
         latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, train = True)
         
         attention_maps, out_save16 = get_cross_attention(prompts, controller, res=args.res_size, from_where=["up", "down"])
@@ -178,7 +179,7 @@ for t in tqdm(scheduler.timesteps):
         #optimizer.step()
         grad_emb = context[1].grad / torch.linalg.norm(context[1].grad)
         
-        context[1] = context[1] - 3 * lambd[step] * grad_emb
+        context[1] = context[1] - 5 * lambd[step] * grad_emb
         context[1] = context[1] * theta[step] + original_context * (1 - theta[step])
         
         context[0] = context[0].detach()
@@ -192,6 +193,7 @@ for t in tqdm(scheduler.timesteps):
         
     else:
         with torch.no_grad():
+            context[1] = original_context
             if not args.guide:
                 torch.save(latents, f'{path_original}{step}.pt')
             latents = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, train=False)

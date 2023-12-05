@@ -62,6 +62,8 @@ register_attention_control(unet, controller, new_attn)
 hr = cv2.resize(h, (args.res_size, args.res_size))
 cv2.imwrite(args.out_path + "hr.png", hr)
 ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
+x_0 = cv2.imread(args.out_path + "x0.png", cv2.IMREAD_GRAYSCALE)
+x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
 prompts = ["A cat on a garden with flowers, realistic 4k"]
 timesteps = 50
@@ -113,15 +115,16 @@ lossF = torch.nn.BCELoss()#BCELoss()#MSELoss()
 lossM = torch.nn.MSELoss(reduction="mean")
 m = torch.nn.Sigmoid()
 
-theta = torch.linspace(0.3, 1, timesteps//2)
-
+theta = torch.linspace(0.7, 1, timesteps//2)
+mask = torch.zeros_like(x0)
 for t in tqdm(scheduler.timesteps):    
     if  0 <= step < timesteps // 2 and args.guide:
-
+        print(t)
         #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
         controller.reset()
+        x_k = scheduler.scale_model_input(x_0, step)
         
-        latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, train = True)
+        latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = True)
         
         attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
         attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
@@ -130,6 +133,7 @@ for t in tqdm(scheduler.timesteps):
         attention_maps = attention_maps16.to(torch.float) 
         
         s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
+        mask = cv2.resize(s_hat.detach().cpu() + hr, x0.shape)
         
         attn_replace = torch.clone(attention_maps)
         attn_replace[:, :, mask_index] = ht
@@ -176,6 +180,8 @@ for t in tqdm(scheduler.timesteps):
         eta = 0.5
         latents = latents2 - eta * lambd[step] * grad_x
         latents = latents * theta[step] + latents_original * (1 - theta[step])
+        print(latents.shape)
+        #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
         latents = latents.detach()
         latents.requires_grad_(True)
     else:
