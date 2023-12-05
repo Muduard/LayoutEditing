@@ -34,6 +34,7 @@ parser.add_argument('--epochs', default=70, type=int,
 parser.add_argument('--guide', action=argparse.BooleanOptionalAction)
 parser.add_argument('--cuda', default=-1, type=int,
                     help='Cuda device to use')
+
 args = parser.parse_args()
 
 path_original = args.out_path + "original/"
@@ -62,17 +63,17 @@ register_attention_control(unet, controller, new_attn)
 hr = cv2.resize(h, (args.res_size, args.res_size))
 cv2.imwrite(args.out_path + "hr.png", hr)
 ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-x_0 = torch.zeros((64,64), device=device, dtype=torch.float16)
-if args.guide:
-    x_0 = cv2.imread(args.out_path + "x0.png")
-    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
+#x_0 = torch.zeros((64,64), device=device, dtype=torch.float16)
+#if args.guide:
+#    x_0 = cv2.imread(args.out_path + "x0.png")
+#    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
-prompts = ["A cat on a garden with flowers, realistic 4k"]
+prompts = ["A cat with a city in the background"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
 x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
 batch_size = 1
-torch.manual_seed(2)
+torch.manual_seed(3)
 noise = torch.randn((batch_size, 4, 64, 64), dtype=torch.float16, device=device) 
 
 latents = noise
@@ -117,16 +118,32 @@ lossF = torch.nn.BCELoss()#BCELoss()#MSELoss()
 lossM = torch.nn.MSELoss(reduction="mean")
 m = torch.nn.Sigmoid()
 
+mask = torch.ones_like(noise)
+if args.guide:
+    original_mask = cv2.imread(f'{path_original}26.png', cv2.IMREAD_GRAYSCALE)
+    original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
+    heatmap = cv2.resize(ht.cpu().numpy() + original_mask.cpu().numpy(), (64,64))
+    heatmap = heatmap / heatmap.max()
+    mask = torch.tensor(heatmap,device=device, dtype=torch.float16)
+    save_tensor_as_image(mask,"mask.png", plot = True)
+
+
 theta = torch.linspace(0.7, 1, timesteps//2)
-mask = torch.zeros((64,64), device=noise.device, dtype=torch.float16)
+sigma = torch.linspace(0.1, 0.1, timesteps//2)
+#mask = torch.ones((64,64), device=noise.device, dtype=torch.float16)
 for t in tqdm(scheduler.timesteps):    
+    x_k = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
+    to_train = False
     if  0 <= step < timesteps // 2 and args.guide:
-        
+        if step < timesteps // 4:
+            to_train = True
+        else: 
+            to_train = False
         #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
         controller.reset()
-        x_k = scheduler.scale_model_input(x_0, step)
+        #x_k = scheduler.scale_model_input(x_0, step)
         
-        latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = True)
+        latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = to_train,sigma=sigma[step])
         
         attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
         attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
@@ -136,18 +153,9 @@ for t in tqdm(scheduler.timesteps):
         
         s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
         
-        heatmap = cv2.resize(s_hat.detach().cpu().numpy() + ht.cpu().numpy(), (64,64))
-        heatmap = heatmap / heatmap.max()
-        print(heatmap.max())
-        mask = torch.tensor(heatmap,device=device, dtype=torch.float16)
-        save_tensor_as_image(mask,"mask.png")
-        #mask = torch.nn.functional.interpolate(
-        #    mask, size=(512 // 8, 512 // 8)
-        #)
-        
         attn_replace = torch.clone(attention_maps)
         attn_replace[:, :, mask_index] = ht
-        save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png")
+        save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
         losses = []
         
         
@@ -158,7 +166,7 @@ for t in tqdm(scheduler.timesteps):
                 + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
             losses.append(l)'''
 
-        latents_original = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
+        #latents_original = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
         #region_diff = torch.ones(latents2.shape, dtype=torch.float16, device=device) - torch.abs(latents2 - latents_original)
         #print(torch.min(region_diff))
         #l = lossF(s_hat,ht) + 0.1 *lossM(latents2, latents_original)
@@ -183,29 +191,27 @@ for t in tqdm(scheduler.timesteps):
         #eta = 0.01
         eta = 0.5
         latents = latents2 - eta * lambd[step] * grad_x
-        latents = latents * theta[step] + latents_original * (1 - theta[step])
+        #latents = latents * theta[step] + latents_original * (1 - theta[step])
         
         #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
         latents = latents.detach()
         latents.requires_grad_(True)
     else:
         with torch.no_grad():
+            to_train = False
             if not args.guide:
                 torch.save(latents, f'{path_original}{step}.pt')
-            latents = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, train=False)
+                if step == timesteps // 2 + 1:
+                    attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
+                    attn =  attention_maps16[:,:,mask_index]
+                    attn = attn / attn.max()
+                    save_tensor_as_image(attn,f"{path_original}{step}.png")
+            else:
+                to_train = True
+            latents = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=x_k, m = mask, train=False)
 
     step += 1
 
-
-
-def save_net(net_, count, place_in_unet, module_name=None):
-            if module_name in ["emb_model"]:
-                torch.save(net_.state_dict(), f'net_{count}.pt')
-                count += 1
-                return count
-            elif hasattr(net_, 'children'):
-                for k, net__ in net_.named_children():
-                    count = save_net(net__, count, place_in_unet, module_name=k)
 
 torch.save(latents, f'{path_original}{step}.pt')
 image = latent2image(vae, latents.detach())

@@ -438,7 +438,7 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
     view_images(np.stack(images, axis=0),file_path=out_path)
 
 
-def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,low_resource=False):
+def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,low_resource=False, sigma=1):
     
     noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0])["sample"]
     
@@ -447,11 +447,10 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     #with torch.no_grad():
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
     
-    
-
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-    if xt != None:
-        latents = xt * m + (1 - m) * latents
+    if xt != None and train:
+        latents = xt * (1-m) + (m) * latents
+    
     if controller != None:
         latents = controller.step_callback(latents)
         
@@ -582,11 +581,13 @@ def register_hook(net_, count, place_in_unet, module_name=None):
             count = register_hook(net__, count, place_in_unet, module_name=k)
     return count
 
-def save_tensor_as_image(image, path):
+def save_tensor_as_image(image, path, plot=False):
     saved = image.clone()
     saved = (saved / 2 + 0.5).clamp(0, 1)
     saved = saved.detach().cpu().numpy()
     saved = (saved * 255).astype(np.uint8)
-    plt.imshow(saved)
-    plt.show()
-    plt.savefig(path)
+    if plot:
+        plt.imshow(saved)
+        plt.savefig(path)
+    else:
+        cv2.imwrite(path, saved)
