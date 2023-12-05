@@ -4,7 +4,7 @@ from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image
+from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image
 import cv2
 import argparse
 from accelerate import Accelerator
@@ -62,13 +62,15 @@ register_attention_control(unet, controller, new_attn)
 hr = cv2.resize(h, (args.res_size, args.res_size))
 cv2.imwrite(args.out_path + "hr.png", hr)
 ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-x_0 = cv2.imread(args.out_path + "x0.png", cv2.IMREAD_GRAYSCALE)
-x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
+x_0 = torch.zeros((64,64), device=device, dtype=torch.float16)
+if args.guide:
+    x_0 = cv2.imread(args.out_path + "x0.png")
+    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
 prompts = ["A cat on a garden with flowers, realistic 4k"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
-
+x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
 batch_size = 1
 torch.manual_seed(2)
 noise = torch.randn((batch_size, 4, 64, 64), dtype=torch.float16, device=device) 
@@ -116,10 +118,10 @@ lossM = torch.nn.MSELoss(reduction="mean")
 m = torch.nn.Sigmoid()
 
 theta = torch.linspace(0.7, 1, timesteps//2)
-mask = torch.zeros_like(x0)
+mask = torch.zeros((64,64), device=noise.device, dtype=torch.float16)
 for t in tqdm(scheduler.timesteps):    
     if  0 <= step < timesteps // 2 and args.guide:
-        print(t)
+        
         #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
         controller.reset()
         x_k = scheduler.scale_model_input(x_0, step)
@@ -133,17 +135,19 @@ for t in tqdm(scheduler.timesteps):
         attention_maps = attention_maps16.to(torch.float) 
         
         s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
-        mask = cv2.resize(s_hat.detach().cpu() + hr, x0.shape)
+        
+        heatmap = cv2.resize(s_hat.detach().cpu().numpy() + ht.cpu().numpy(), (64,64))
+        heatmap = heatmap / heatmap.max()
+        print(heatmap.max())
+        mask = torch.tensor(heatmap,device=device, dtype=torch.float16)
+        save_tensor_as_image(mask,"mask.png")
+        #mask = torch.nn.functional.interpolate(
+        #    mask, size=(512 // 8, 512 // 8)
+        #)
         
         attn_replace = torch.clone(attention_maps)
         attn_replace[:, :, mask_index] = ht
-        attn = s_hat.clone()
-        save_attn = (attn / 2 + 0.5).clamp(0, 1)
-        save_attn = attn.detach().cpu().numpy()
-        save_attn = (save_attn * 255).astype(np.uint8)
-        plt.imshow(save_attn)
-        plt.show()
-        plt.savefig("loss_attn.png")
+        save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png")
         losses = []
         
         
@@ -180,7 +184,7 @@ for t in tqdm(scheduler.timesteps):
         eta = 0.5
         latents = latents2 - eta * lambd[step] * grad_x
         latents = latents * theta[step] + latents_original * (1 - theta[step])
-        print(latents.shape)
+        
         #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
         latents = latents.detach()
         latents.requires_grad_(True)
@@ -203,7 +207,7 @@ def save_net(net_, count, place_in_unet, module_name=None):
                 for k, net__ in net_.named_children():
                     count = save_net(net__, count, place_in_unet, module_name=k)
 
-
+torch.save(latents, f'{path_original}{step}.pt')
 image = latent2image(vae, latents.detach())
 plt.imshow(image)
 plt.savefig(args.out_path + "image.png")

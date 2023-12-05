@@ -447,11 +447,11 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     #with torch.no_grad():
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
     
-    if xt:
-        noise_pred = xt[m] + noise_pred[1 - m]
+    
 
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-    
+    if xt != None:
+        latents = xt * m + (1 - m) * latents
     if controller != None:
         latents = controller.step_callback(latents)
         
@@ -581,3 +581,12 @@ def register_hook(net_, count, place_in_unet, module_name=None):
         for k, net__ in net_.named_children():
             count = register_hook(net__, count, place_in_unet, module_name=k)
     return count
+
+def save_tensor_as_image(image, path):
+    saved = image.clone()
+    saved = (saved / 2 + 0.5).clamp(0, 1)
+    saved = saved.detach().cpu().numpy()
+    saved = (saved * 255).astype(np.uint8)
+    plt.imshow(saved)
+    plt.show()
+    plt.savefig(path)
