@@ -448,8 +448,8 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
     
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-    if xt != None and train:
-        latents = xt * (1-m) + (m) * latents
+    #if xt != None and train:
+        #latents = xt * (1-m) + (m) * latents
     
     if controller != None:
         latents = controller.step_callback(latents)
