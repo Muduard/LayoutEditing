@@ -69,6 +69,7 @@ if args.guide:
     original_mask = cv2.imread(f'{path_original}26.png', cv2.IMREAD_GRAYSCALE)
     original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
     new_mask = torch.roll(original_mask,shifts=6, dims=1)
+    new_mask = torch.where(new_mask < 0.4, -1, 1)
     save_tensor_as_image(new_mask, args.mask)
 h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
 new_attn = get_multi_level_attention_from_average(h, device)
@@ -83,7 +84,7 @@ ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.flo
 #    x_0 = cv2.imread(args.out_path + "x0.png")
 #    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
-prompts = ["A cat with a city in the background"]
+prompts = ["A cat with a city in the background and a little mouse"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
 x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
@@ -181,7 +182,11 @@ for t in tqdm(scheduler.timesteps):
                 l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
                     + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
                 losses.append(l)'''
-
+            #TODO loss sulla similarità delle attenzioni
+            #TODO controlla oggetti piccoli
+            #TODO pipeline sperimentale con pochi prompt
+            #TODO Cosa succede quando si usano più maschere
+            #TODO Prendi un'immagine senza oggetti la inverti poi aggiungi un oggetto
             #latents_original = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
             #region_diff = torch.ones(latents2.shape, dtype=torch.float16, device=device) - torch.abs(latents2 - latents_original)
             #print(torch.min(region_diff))
@@ -189,12 +194,10 @@ for t in tqdm(scheduler.timesteps):
             #latents2 = latents2 * theta[step] + latents_original * (1 - theta[step])
             l1 = lossF(s_hat,ht) \
                 + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-            l2 = 100 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+            l2 = 10 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
             #l3 = lossF(1 - s_hat, 1 - ht)
             #print(l1)
             #print(l2)
-            print(l1)
-            print(l2)
             loss = l1 + l2#sum(losses)
             loss.backward()
             #if loss < 0.01:
@@ -207,14 +210,14 @@ for t in tqdm(scheduler.timesteps):
             grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
             #grad_x[grad_x != grad_x] = 0
             #eta = 0.01
-            eta = 0.5
+            eta = 0.1
             
             latents = latents2 - eta * lambd[step]  * grad_x
             #Resampling
             if args.resampling_steps > 0 and i < args.resampling_steps:
-                t1 = scheduler.timesteps[step-1]
-                latents = torch.sqrt(scheduler.alphas[t] / scheduler.alphas[t1]) * latents 
-                + torch.sqrt(1 - scheduler.alphas[t] / scheduler.alphas[t1]) * torch.randn_like(latents)
+                t1 = scheduler.timesteps[step+1]
+                latents = torch.sqrt(1 - scheduler.betas[t1]) * latents 
+                + torch.sqrt(scheduler.betas[t1]) * torch.randn_like(latents)
             #latents = latents * theta[step] + latents_original * (1 - theta[step])
             
             #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
