@@ -16,10 +16,6 @@ import torch.nn.functional as F
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 repo_id =  "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
-#pipe = DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16).to(device)#DiffusionPipeline.from_pretrained(repo_id, torch_dtype=torch.float16,use_safetensors=True).to(device)
-
-#pipe.enable_xformers_memory_efficient_attention()
-#pipe.unet = torch.nn.DataParallel(pipe.unet)
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="new_mask.png",
                     help='Target mask of layout editing')
@@ -43,27 +39,31 @@ parser.add_argument("--mask_path", type=str, help="Path of masks as image files 
 parser.add_argument("--resampling_steps", type=int, default=0, help="Resample noise for better coherence")
 parser.add_argument("--seed", type=int, default=24)
 
+MODEL_TYPE = torch.float16
+
 
 args = parser.parse_args()
 
 path_original = args.out_path + "original/"
 os.makedirs(args.out_path,exist_ok = True)
 os.makedirs(path_original,exist_ok = True)
-
+os.makedirs("attentions/",exist_ok = True)
 device = "cpu"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=torch.float16).to(device)
-tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=torch.float16)
-text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=torch.float16).to(device)
-unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=torch.float16).to(device)
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
 scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float32)
 
 
 mask_index = 2
 timesteps = 50
+h = None
+new_attn = None
 
 if args.guide:
     original_mask = cv2.imread(f'{path_original}26.png', cv2.IMREAD_GRAYSCALE)
@@ -71,15 +71,17 @@ if args.guide:
     new_mask = torch.roll(original_mask,shifts=6, dims=1)
     new_mask = torch.where(new_mask < 0.4, -1, 1)
     save_tensor_as_image(new_mask, args.mask)
-h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
-new_attn = get_multi_level_attention_from_average(h, device)
-
+    h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
+    new_attn = get_multi_level_attention_from_average(h, device)
+    hr = cv2.resize(h, (args.res_size, args.res_size))
+    cv2.imwrite(args.out_path + "hr.png", hr)
+    ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
+    x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
+    ht.requires_grad = False
 controller = AttentionStore()
 register_attention_control(unet, controller, new_attn)
-hr = cv2.resize(h, (args.res_size, args.res_size))
-cv2.imwrite(args.out_path + "hr.png", hr)
-ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-#x_0 = torch.zeros((64,64), device=device, dtype=torch.float16)
+
+#x_0 = torch.zeros((64,64), device=device, dtype=MODEL_TYPE)
 #if args.guide:
 #    x_0 = cv2.imread(args.out_path + "x0.png")
 #    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
@@ -87,10 +89,10 @@ ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.flo
 prompts = ["A cat with a city in the background and a little mouse"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
-x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
+
 batch_size = 1
 torch.manual_seed(args.seed)
-noise = torch.randn((batch_size, 4, 64, 64), dtype=torch.float16, device=device) 
+noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
 
 latents = noise
 
@@ -126,12 +128,14 @@ def reset_grad(a):
     a.retain_grad()
     return a
 
-ht.requires_grad = False
+
 step = 0
 lambd = torch.linspace(1, 0, timesteps // 2)
 #with torch.autograd.detect_anomaly():
 lossF = torch.nn.BCELoss()#BCELoss()#MSELoss()
 lossM = torch.nn.MSELoss()
+
+lossKL = torch.nn.KLDivLoss()
 m = torch.nn.Sigmoid()
 
 mask = torch.ones_like(noise)
@@ -139,90 +143,101 @@ if args.guide:
     
     heatmap = cv2.resize(ht.cpu().numpy() + original_mask.cpu().numpy(), (64,64))
     #heatmap = heatmap / heatmap.max()
-    mask = torch.tensor(heatmap,device=device, dtype=torch.float16)
+    mask = torch.tensor(heatmap,device=device, dtype=MODEL_TYPE)
     save_tensor_as_image(mask,"mask.png", plot = True)
 
 
 theta = torch.linspace(0.7, 1, timesteps//2)
 sigma = torch.linspace(0.1, 0.1, timesteps//2)
-#mask = torch.ones((64,64), device=noise.device, dtype=torch.float16)
+#mask = torch.ones((64,64), device=noise.device, dtype=MODEL_TYPE)
 
 for t in tqdm(scheduler.timesteps):    
-    x_k = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
+    if args.guide:
+        x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
     to_train = False
     if  0 <= step < timesteps // 2 and args.guide:
-        for i in range(args.resampling_steps + 1):
-            if step < timesteps // 2:
-                to_train = True
-            else: 
-                to_train = False
-            #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
-            controller.reset()
-            #x_k = scheduler.scale_model_input(x_0, step)
+        
+        if step < timesteps // 2:
+            to_train = True
+        else: 
+            to_train = False
+        #optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, pipe.unet.parameters()), args.lr)
+        controller.reset()
+        #x_k = scheduler.scale_model_input(x_0, step)
+        
             
-            latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = to_train,sigma=sigma[step])
-            
-            attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
-            attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
-            attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
-            
-            attention_maps = attention_maps16.to(torch.float) 
-            
-            s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
-            
-            attn_replace = torch.clone(attention_maps)
-            attn_replace[:, :, mask_index] = ht
-            save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
-            losses = []
-            
-            
-            '''for j in range(attention_maps.shape[-1]): 
-                #l = lossF(s_hat,ht) \
-                #    + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-                l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
-                    + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
-                losses.append(l)'''
-            #TODO loss sulla similarità delle attenzioni
-            #TODO controlla oggetti piccoli
-            #TODO pipeline sperimentale con pochi prompt
-            #TODO Cosa succede quando si usano più maschere
-            #TODO Prendi un'immagine senza oggetti la inverti poi aggiungi un oggetto
-            #latents_original = torch.load(f'{path_original}{step}.pt').to(dtype=torch.float16, device=device)
-            #region_diff = torch.ones(latents2.shape, dtype=torch.float16, device=device) - torch.abs(latents2 - latents_original)
-            #print(torch.min(region_diff))
-            #l = lossF(s_hat,ht) + 0.1 *lossM(latents2, latents_original)
-            #latents2 = latents2 * theta[step] + latents_original * (1 - theta[step])
-            l1 = lossF(s_hat,ht) \
-                + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-            l2 = 10 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
-            #l3 = lossF(1 - s_hat, 1 - ht)
-            #print(l1)
-            #print(l2)
-            loss = l1 + l2#sum(losses)
-            loss.backward()
-            #if loss < 0.01:
-            #    print(loss)
-            #    break
-            
-            context[0] = context[0].detach()
-            context[1] = context[1].detach()
-            
-            grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-            #grad_x[grad_x != grad_x] = 0
-            #eta = 0.01
-            eta = 0.1
-            
-            latents = latents2 - eta * lambd[step]  * grad_x
-            #Resampling
-            if args.resampling_steps > 0 and i < args.resampling_steps:
-                t1 = scheduler.timesteps[step+1]
-                latents = torch.sqrt(1 - scheduler.betas[t1]) * latents 
-                + torch.sqrt(scheduler.betas[t1]) * torch.randn_like(latents)
-            #latents = latents * theta[step] + latents_original * (1 - theta[step])
-            
-            #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
-            latents = latents.detach()
-            latents.requires_grad_(True)
+        latents2 = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = to_train,sigma=sigma[step], guide=args.guide)
+        
+        attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
+        attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
+        attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
+        
+        attention_maps = attention_maps16.to(torch.float) 
+        
+        s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
+        
+        attn_replace = torch.clone(attention_maps)
+        attn_replace[:, :, mask_index] = ht
+        save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
+        losses = []
+        
+        
+        '''for j in range(attention_maps.shape[-1]): 
+            #l = lossF(s_hat,ht) \
+            #    + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
+            l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
+                + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
+            losses.append(l)'''
+        #TODO loss sulla similarità delle attenzioni
+        #TODO controlla oggetti piccoli
+        #TODO pipeline sperimentale con pochi prompt
+        #TODO Cosa succede quando si usano più maschere
+        #TODO Prendi un'immagine senza oggetti la inverti poi aggiungi un oggetto
+        #TODO Net using only variance and mean of gaussian
+        #latents_original = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
+        #region_diff = torch.ones(latents2.shape, dtype=MODEL_TYPE, device=device) - torch.abs(latents2 - latents_original)
+        #print(torch.min(region_diff))
+        #l = lossF(s_hat,ht) + 0.1 *lossM(latents2, latents_original)
+        #latents2 = latents2 * theta[step] + latents_original * (1 - theta[step])
+        
+        
+        l1 = lossF(s_hat,ht) \
+            + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
+        
+        l2 = 1000 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+        #l3 = 0.05 * (x_k - latents2).max()
+        
+        #print(l1)
+        #print(l2)
+        #print(l3)
+        loss = l1 + l2#sum(losses)
+        loss.backward()
+        #if loss < 0.01:
+        #    print(loss)
+        #    break
+        
+        context[0] = context[0].detach()
+        context[1] = context[1].detach()
+        
+
+        grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
+        #grad_x[grad_x != grad_x] = 0
+        #eta = 0.01
+        eta = 0.1
+        
+        latents = latents2 - eta * lambd[step]  * grad_x
+        #Resampling
+        if args.resampling_steps > 0 and step == 5:
+            t1 = scheduler.timesteps[step]
+            latents = scheduler.add_noise(latents,torch.randn_like(latents), t1)
+            latents = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=None, m = mask, train=False, guide=args.guide)
+            #latents = torch.sqrt(1 - scheduler.betas[t1]) * latents
+            #+ torch.sqrt(scheduler.betas[t1]) * c
+        #latents = latents * theta[step] + latents_original * (1 - theta[step])
+        
+        #latents = (theta[step]) * latents + (1 - theta[step]) * torch.randn_like(latents)
+        latents = latents.detach()
+        latents.requires_grad_(True)
     else:
         with torch.no_grad():
             to_train = False
@@ -235,8 +250,8 @@ for t in tqdm(scheduler.timesteps):
                     attn = torch.where(attn < 0.4, -1, 1)
                     save_tensor_as_image(attn,f"{path_original}{step}.png")
             
-            latents = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=x_k, m = mask, train=False)
-
+            latents = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=None, m = mask, train=False, guide=args.guide)
+            
     step += 1
 
 

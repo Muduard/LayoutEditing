@@ -437,8 +437,8 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
         images.append(image)
     view_images(np.stack(images, axis=0),file_path=out_path)
 
-
-def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,low_resource=False, sigma=1):
+kl = torch.nn.KLDivLoss()
+def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,guide=False, sigma=1):
     
     noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0])["sample"]
     
@@ -446,7 +446,16 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     
     #with torch.no_grad():
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+    eps_k = None
+    '''if not guide:
+        torch.save(noise_pred, f'test/noise_{t}.pt')
+    else:
+        eps_k = torch.load(f'test/noise_{t}.pt', map_location=unet.device)
+        l = (eps_k - noise_pred).max()
+        print(l)'''
     
+    
+
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
     #if xt != None and train:
         #latents = xt * (1-m) + (m) * latents
@@ -508,10 +517,9 @@ def register_attention_control(model, controller, attns = None):
                 sim.masked_fill_(~mask, max_neg_value)
 
             additional_attn = 0
-            
+            w = 0.5 * sim.max()
             #pww
             if attns != None:
-                w = 0.5 * sim.max()
                 additional_attn = attns[f'{sim.shape[1]}']
 
             # attention, what we cannot get enough of
