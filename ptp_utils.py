@@ -464,7 +464,7 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
         latents = controller.step_callback(latents)
         
     
-    return latents
+    return latents, noise_pred
 
 def register_attention_control(model, controller, attns = None):
     def ca_forward(self, place_in_unet):
