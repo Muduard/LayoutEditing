@@ -3,3 +3,6 @@ attentions
 __pycache__
 *.png
 datasets/*
+generated/*
+sample_dir1/*
+sample_dir2/*

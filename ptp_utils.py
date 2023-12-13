@@ -444,21 +444,9 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     
     noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1])["sample"]
     
-    #with torch.no_grad():
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-    eps_k = None
-    '''if not guide:
-        torch.save(noise_pred, f'test/noise_{t}.pt')
-    else:
-        eps_k = torch.load(f'test/noise_{t}.pt', map_location=unet.device)
-        l = (eps_k - noise_pred).max()
-        print(l)'''
-    
-    
 
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-    #if xt != None and train:
-        #latents = xt * (1-m) + (m) * latents
     
     if controller != None:
         latents = controller.step_callback(latents)

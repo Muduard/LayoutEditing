@@ -200,7 +200,7 @@ for t in tqdm(scheduler.timesteps):
                 
                 l2 = 100 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
                 #l3 = 0.05 * (x_k - latents2).max()
-
+                
                 loss = 2 * l1 + l2#sum(losses)
                 loss.backward()
                 

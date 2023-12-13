@@ -1,6 +1,6 @@
 import os 
 import torch
-from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel
+from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -12,7 +12,7 @@ import numpy as np
 import torch.nn.functional as F
 
 
-repo_id =  "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
+repo_id =  "CompVis/stable-diffusion-v1-4"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="new_mask.png",
@@ -52,9 +52,9 @@ tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
-scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float32)
-
-
+scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE)
+#pipe = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4", scheduler=scheduler)
+#pipe = pipe.to(device)
 import json
  
 # Opening JSON file
@@ -78,18 +78,19 @@ for i in data['annotations']:
 
 # Closing file
 f.close()
+
 timesteps = 50
 scheduler.set_timesteps(timesteps)
-
 batch_size = 1
 torch.manual_seed(args.seed)
-for param in unet.parameters():
-    param.requires_grad = False
-guidance_scale = 3
+
+guidance_scale = 7.5
 i = 0
-for caption in tqdm(captions):
+noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
+for caption in tqdm(captions[6:]):
     
-    latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
+    print(caption)
+    latents = torch.clone(noise)
     text_input = tokenizer(
             caption,
             padding="max_length",
@@ -107,8 +108,14 @@ for caption in tqdm(captions):
     uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
     context = [uncond_embeddings, text_emb]
     for t in tqdm(scheduler.timesteps):
+        
         with torch.no_grad():
-            latents, _ = diffusion_step(unet,scheduler, None, latents, context, t, guidance_scale, xt=None, m = None, train=False, guide=False)
-    image = latent2image(vae, latents.detach())
+            latents, _ = diffusion_step(unet, scheduler,None, latents, context, t, guidance_scale)
+            #noise_pred = unet(latents, t, encoder_hidden_states=context[1])["sample"]
+            #latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
+
+    image = latent2image(vae, latents)
+    
     cv2.imwrite(f"generated/{i}.png",image)
+   #image.save(f"generated/{i}.png")
     i+=1
