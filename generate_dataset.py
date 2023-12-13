@@ -25,7 +25,7 @@ parser.add_argument('--lr', default=0.01, type=float,
                     help='Optimization Learning Rate')
 parser.add_argument('--epochs', default=70, type=int,
                     help='Optimization Epochs')
-parser.add_argument('--guide', action=argparse.BooleanOptionalAction)
+#parser.add_argument('--guide', action=argparse.BooleanOptionalAction)
 parser.add_argument('--cuda', default=-1, type=int,
                     help='Cuda device to use')
 parser.add_argument('--timesteps', default=50, type=int, 
@@ -47,7 +47,7 @@ device = "cpu"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae",torch_dtype=MODEL_TYPE).to(device)
 tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
@@ -82,12 +82,12 @@ f.close()
 timesteps = 50
 scheduler.set_timesteps(timesteps)
 batch_size = 1
-torch.manual_seed(args.seed)
 
-guidance_scale = 7.5
+
+guidance_scale =7.5
 i = 0
 noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-for caption in tqdm(captions[6:]):
+for caption in tqdm(captions[8:]):
     
     print(caption)
     latents = torch.clone(noise)
@@ -106,7 +106,7 @@ for caption in tqdm(captions[6:]):
             [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
     )
     uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
-    context = [uncond_embeddings, text_emb]
+    context = torch.cat([uncond_embeddings, text_emb])
     for t in tqdm(scheduler.timesteps):
         
         with torch.no_grad():

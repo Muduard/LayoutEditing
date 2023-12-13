@@ -440,10 +440,10 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
 kl = torch.nn.KLDivLoss()
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,guide=False, sigma=1):
     
-    noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0])["sample"]
-    
-    noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1])["sample"]
-    
+    latents_input = torch.cat([latents] * 2)
+    noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
+    noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
+
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
 
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
