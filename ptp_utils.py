@@ -7,8 +7,7 @@ import cv2
 import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
-from embedder_model import EmbedderModel
-
+from tqdm import tqdm
 LOW_RESOURCE = True 
 class LocalBlend:
 
@@ -343,7 +342,7 @@ def latent2image(vae, latents):
     latents = 1 / 0.18215 * latents
     image = vae.decode(latents)['sample']
     image = (image / 2 + 0.5).clamp(0, 1)
-    image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
+    image = image.cpu().permute(0, 2, 3, 1).float().numpy()[0]
     image = (image * 255).astype(np.uint8)
     return image
 
@@ -441,6 +440,7 @@ kl = torch.nn.KLDivLoss()
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,guide=False, sigma=1):
     
     latents_input = torch.cat([latents] * 2)
+    latents_input = scheduler.scale_model_input(latents_input, t)
     noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
     noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
 
@@ -587,3 +587,55 @@ def save_tensor_as_image(image, path, plot=False):
         plt.savefig(path)
     else:
         cv2.imwrite(path, saved)
+
+def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps):
+    
+    timesteps = reversed(scheduler.timesteps)
+    intermediate_latents = []
+    for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
+
+        # We'll skip the final iteration
+        if i >= num_inference_steps - 1: continue
+
+        t = timesteps[i]
+
+        # Expand the latents if we are doing classifier free guidance
+        latent_model_input = torch.cat([latents] * 2)
+        latent_model_input = scheduler.scale_model_input(latent_model_input, t)
+
+        # Predict the noise residual
+        noise_pred = unet(latent_model_input, t, encoder_hidden_states=context).sample
+
+        
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+        current_t = max(0, t.item() - (1000//num_inference_steps)) #t
+        next_t = t # t+1
+        alpha_t = scheduler.alphas_cumprod[current_t]
+        alpha_t_next = scheduler.alphas_cumprod[next_t]
+
+        # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
+        latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+        intermediate_latents.append(latents)
+            
+    return torch.cat(intermediate_latents)
+
+def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt):
+    text_input = tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+    text_emb = text_encoder(text_input.input_ids.to(device))[0]
+
+    max_length = text_input.input_ids.shape[-1]
+    uncond_input = tokenizer(
+            [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
+    )
+    uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
+    context = torch.cat([uncond_embeddings, text_emb])
+    return context

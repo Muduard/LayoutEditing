@@ -13,7 +13,7 @@ from typing import List, Union
 NUM_DDIM_STEPS = 50
 GUIDANCE_SCALE = 7.5
 
-device = "cuda:0"
+device = "cuda:1"
 
 def load_512(image_path, left=0, right=0, top=0, bottom=0):
     if type(image_path) is str:

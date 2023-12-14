@@ -7,10 +7,9 @@ import matplotlib.pyplot as plt
 from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image
 import cv2
 import argparse
-from accelerate import Accelerator
 import numpy as np
 import torch.nn.functional as F
-
+from torchvision.transforms.functional import to_pil_image
 
 repo_id =  "CompVis/stable-diffusion-v1-4"#"CompVis/stable-diffusion-v1-4"#
 
@@ -84,9 +83,9 @@ scheduler.set_timesteps(timesteps)
 batch_size = 1
 
 
-guidance_scale =7.5
+guidance_scale = 7.5
 i = 0
-noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
+noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) * scheduler.init_noise_sigma
 for caption in tqdm(captions[8:]):
     
     print(caption)
@@ -116,6 +115,8 @@ for caption in tqdm(captions[8:]):
 
     image = latent2image(vae, latents)
     
-    cv2.imwrite(f"generated/{i}.png",image)
+    image = to_pil_image(image)
+    image.save(f"generated/{i}.png")
+    #cv2.imwrite(f"generated/{i}.png",image)
    #image.save(f"generated/{i}.png")
     i+=1
