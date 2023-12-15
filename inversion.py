@@ -17,7 +17,7 @@ repo_id =  "CompVis/stable-diffusion-v1-4"#"CompVis/stable-diffusion-v1-4"#
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="cat3.png",
                     help='Target mask of layout editing')
-parser.add_argument('--res_size', default=16, type=int,
+parser.add_argument('--res_size', default=32, type=int,
                     help='Resolution size to edit')
 parser.add_argument('--out_path', default="test/",
                     help='Output folder')
@@ -57,6 +57,14 @@ unet = pipe.unet
 lossF = torch.nn.BCELoss()
 
 
+def diffusion_step2(latents, t, text_embeddings, pipe):
+    noise_pred_uncond = unet(latents, t, encoder_hidden_states=text_embeddings[0].unsqueeze(0))["sample"]
+    noise_prediction_text = unet(latents, t, encoder_hidden_states=text_embeddings[1].unsqueeze(0))["sample"]
+    noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+    
+    
+    return noise_pred
+
 def sample(prompt, start_step=0, start_latents=None,
            guidance_scale=3.5, num_inference_steps=30,
            num_images_per_prompt=1, do_classifier_free_guidance=True,
@@ -88,6 +96,7 @@ def sample(prompt, start_step=0, start_latents=None,
     for i in tqdm(range(start_step, num_inference_steps)):
         controller.reset()
         t = pipe.scheduler.timesteps[i]
+        if i < num_inference_steps // 2: latents.requires_grad_(True)
         latents = pipe.scheduler.scale_model_input(latents, t)
         
         '''noise_pred_uncond = unet(latents, t, encoder_hidden_states=text_embeddings[0].unsqueeze(0))["sample"]
@@ -102,27 +111,42 @@ def sample(prompt, start_step=0, start_latents=None,
         direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*noise_pred
         latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt'''
         
-        if guide and num_inference_steps // 2 < i < num_inference_steps:
+        if guide and 2 <= i < num_inference_steps // 2:
+            #noise_pred = diffusion_step2(latents, t, text_embeddings, pipe)
             latents2, _ = diffusion_step(unet, scheduler, controller, latents, text_embeddings, t, guidance_scale)
             #latents2 = pipe.scheduler.step(noise_pred, t, latents).prev_sample
             #latents2 = controller.step_callback(latents2)
-            attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+            attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
             
             attention_maps = attention_maps16.to(torch.float) 
             s_hat = attention_maps[:,:,mask_index] 
-            
+            original_latents = torch.load(f'inversion/{i}.pt')
+
             save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
             l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-           
-            l1.backward()
+            l2 = 100 * lossM(latents2, original_latents * (1-mask) + (mask) * latents2)
+            print(l1)
+            print(l2)
+            loss = l1 + l2
+            loss.backward()
             
-            grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-            eta = 0.5
-            
+            grad_x = latents.grad / torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
+            eta = 1.2
             latents = latents2 - eta * lambd[i]  * grad_x
+            # Instead, let's do it ourselves:
+            '''prev_t = max(1, t.item() - (1000//num_inference_steps)) # t-1
+            alpha_t = pipe.scheduler.alphas_cumprod[t.item()]
+            alpha_t_prev = pipe.scheduler.alphas_cumprod[prev_t]
+
+            predicted_x0 = (latents - (1-alpha_t).sqrt()*noise_pred) / alpha_t.sqrt()
+            noise_pred = noise_pred - (1-alpha_t).sqrt() * grad_x
+            #
+            direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*noise_pre
+            
+            latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt'''
             text_embeddings = text_embeddings.detach()
             latents = latents.detach()
-            latents.requires_grad_(True)
+            
         else:
             with torch.no_grad():
                 latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
@@ -166,22 +190,37 @@ if args.guide:
     cv2.imwrite(args.out_path + "hr.png", hr)
     ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
     ht.requires_grad = False
+
+
 controller = AttentionStore()
 register_attention_control(unet, controller, None)
 for param in unet.parameters():
     param.requires_grad = False
 lossF = torch.nn.BCELoss()
-
-inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
-                            controller=controller, ht=ht,lossF=lossF,mask_index=2,
-                            prompt=prompt,guide=args.guide)
-
-
-start_step = 25
-#rec_latents = latent2image(inverted_latents[-1].unsqueeze(0)
 with torch.no_grad():
-    rec_image = sample(prompt,start_latents=inverted_latents[-(start_step+1)][None][0], \
-        start_step=start_step, num_inference_steps=50,controller=controller, ht=ht,
-        lossF=lossF,mask_index=2,guide=False)
+    inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
+                                controller=controller, ht=ht,lossF=lossF,mask_index=2,
+                                prompt=prompt,guide=False)
+
+attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+save_tensor_as_image(attention_maps16[:, :, mask_index],"original_mask.png")
+
+start_step = 0
+#rec_latents = latent2image(inverted_latents[-1].unsqueeze(0)
+lossM = torch.nn.MSELoss()
+mask = torch.ones_like(inverted_latents[-1])
+if args.guide:
+    original_mask = cv2.imread(f'original_mask.png', cv2.IMREAD_GRAYSCALE)
+    original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
+    heatmap = cv2.resize(ht.cpu().numpy() + original_mask.cpu().numpy(), (64,64))
+    #heatmap = heatmap / heatmap.max()
+    mask = torch.tensor(heatmap,device=device, dtype=MODEL_TYPE)
+    save_tensor_as_image(mask,"mask.png")
+
+
+
+rec_image = sample(prompt,start_latents=inverted_latents[-(start_step+1)][None][0], \
+    start_step=start_step, num_inference_steps=50,controller=controller, ht=ht,
+    lossF=lossF,mask_index=2,guide=True)
 #print(rec_image.shape)
 cv2.imwrite("a.png",rec_image)

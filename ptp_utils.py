@@ -133,113 +133,6 @@ def view_images(images, num_rows=1, offset_ratio=0.02, file_path="Attns.png"):
     plt.show()
     plt.savefig(file_path)
 
-class AttentionControl(abc.ABC):
-
-    def step_callback(self, x_t):
-        return x_t
-
-    def between_steps(self):
-        return
-
-    @property
-    def num_uncond_att_layers(self):
-        return self.num_att_layers if LOW_RESOURCE else 0
-
-    @abc.abstractmethod
-    def forward (self, attn, is_cross: bool, place_in_unet: str):
-        raise NotImplementedError
-
-    def __call__(self, attn, is_cross: bool, place_in_unet: str):
-        if self.cur_att_layer >= self.num_uncond_att_layers:
-            if LOW_RESOURCE:
-                attn = self.forward(attn, is_cross, place_in_unet)
-            else:
-                h = attn.shape[0]
-                attn[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
-        self.cur_att_layer += 1
-        if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:
-            self.cur_att_layer = 0
-            self.cur_step += 1
-            self.between_steps()
-        return attn
-
-    def reset(self):
-        self.cur_step = 0
-        self.cur_att_layer = 0
-
-    def __init__(self):
-        self.cur_step = 0
-        self.num_att_layers = -1
-        self.cur_att_layer = 0
-
-class EmptyControl(AttentionControl):
-
-    def forward (self, attn, is_cross: bool, place_in_unet: str):
-        return attn
-
-
-class AttentionStore(AttentionControl):
-
-    @staticmethod
-    def get_empty_store():
-        return {"down_cross": [], "mid_cross": [], "up_cross": [],
-                "down_self": [],  "mid_self": [],  "up_self": []}
-
-    def forward(self, attn, is_cross: bool, place_in_unet: str):
-        key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
-        #if attn.shape[1] <= 32 ** 2:  # avoid memory overhead
-        self.step_store[key].append(attn)
-
-        return attn
-
-    def between_steps(self):
-        if len(self.attention_store) == 0:
-            self.attention_store = self.step_store
-        else:
-            for key in self.attention_store:
-                for i in range(len(self.attention_store[key])):
-                    
-                    self.attention_store[key][i] += self.step_store[key][i]
-        self.step_store = self.get_empty_store()
-
-    def get_average_attention(self):
-        average_attention = {key: [item / self.cur_step for item in self.attention_store[key]] for key in self.attention_store}
-        return average_attention
-
-
-    def reset(self):
-        super(AttentionStore, self).reset()
-        self.step_store = self.get_empty_store()
-        self.attention_store = {}
-
-    def __init__(self):
-        super(AttentionStore, self).__init__()
-        self.step_store = self.get_empty_store()
-        self.attention_store = {}
-
-
-class AttentionReplace(AttentionStore, abc.ABC):
-
-    def step_callback(self, x_t):
-        return x_t
-
-    def replace_self_attention(self, attn_base, att_replace):
-        if att_replace.shape[2] <= 16 ** 2:
-            return attn_base.unsqueeze(0).expand(att_replace.shape[0], *attn_base.shape)
-        else:
-            return att_replace
-
-    def forward(self, attn, is_cross: bool, place_in_unet: str):
-        super(AttentionReplace, self).forward(attn, is_cross, place_in_unet)
-        if attn.shape[2] == 77:
-          if f'{attn.shape[1]}' in self.new_attn.keys():
-            attn[:, :, self.token_numbers] = self.new_attn[f'{attn.shape[1]}']
-        return attn
-
-    def __init__(self, new_attn, token_numbers):
-        super(AttentionReplace, self).__init__()
-        self.new_attn = new_attn
-        self.token_numbers = token_numbers
 
 def aggregate_attention(prompts, attention_store: AttentionStore, res: int, from_where: List[str], is_cross: bool, select: int):
     out = []
@@ -504,9 +397,13 @@ def register_hook(net_, count, place_in_unet, module_name=None):
 
 def save_tensor_as_image(image, path, plot=False):
     saved = image.clone()
+    saved = saved / saved.max()
     saved = (saved / 2 + 0.5).clamp(0, 1)
+    if len(saved.shape) < 3:
+            saved = saved.unsqueeze(2)
     saved = saved.detach().cpu().numpy()
     saved = (saved * 255).astype(np.uint8)
+    saved = np.where(saved < 180, 0, 255)
     if plot:
         plt.imshow(saved)
         plt.savefig(path)
@@ -520,10 +417,10 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
     intermediate_latents = []
     lambd = torch.linspace(1, 0, num_inference_steps)
     for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
-        controller.reset()
+        
         # We'll skip the final iteration
         if i >= num_inference_steps - 1: continue
-
+        if i > num_inference_steps // 2: latents.requires_grad_(True)
         t = timesteps[i]
 
         latents = scheduler.scale_model_input(latents, t)
@@ -531,7 +428,7 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
         noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
         
         noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-
+        
         current_t = max(0, t.item() - (1000//num_inference_steps)) #t
         next_t = t # t+1
         alpha_t = scheduler.alphas_cumprod[current_t]
@@ -540,7 +437,7 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
         # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
         latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
         
-        if guide and i < num_inference_steps//2:
+        if guide and i < num_inference_steps // 2:
             attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
             s_hat = attention_maps16[:,:,mask_index]
             save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
@@ -562,6 +459,7 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
         else:
             latents2 = latents2.detach()
             latents = latents2
+        torch.save(latents,f'inversion/{num_inference_steps - i}.pt')
         intermediate_latents.append(latents.detach())
         
             
