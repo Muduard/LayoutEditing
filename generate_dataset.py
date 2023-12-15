@@ -112,11 +112,11 @@ for caption in tqdm(captions[8:]):
             latents, _ = diffusion_step(unet, scheduler,None, latents, context, t, guidance_scale)
             #noise_pred = unet(latents, t, encoder_hidden_states=context[1])["sample"]
             #latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-
+            
     image = latent2image(vae, latents)
     
     image = to_pil_image(image)
     image.save(f"generated/{i}.png")
     #cv2.imwrite(f"generated/{i}.png",image)
-   #image.save(f"generated/{i}.png")
+    #image.save(f"generated/{i}.png")
     i+=1

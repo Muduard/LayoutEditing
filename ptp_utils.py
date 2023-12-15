@@ -9,32 +9,6 @@ import torchvision.transforms as transforms
 import torch.nn.functional as F
 from tqdm import tqdm
 LOW_RESOURCE = True 
-class LocalBlend:
-
-    def __call__(self, x_t, attention_store):
-        k = 1
-        maps = attention_store["down_cross"][2:4] + attention_store["up_cross"][:3]
-        maps = [item.reshape(self.alpha_layers.shape[0], -1, 1, 16, 16, MAX_NUM_WORDS) for item in maps]
-        maps = torch.cat(maps, dim=1)
-        maps = (maps * self.alpha_layers).sum(-1).mean(1)
-        mask = nnf.max_pool2d(maps, (k * 2 + 1, k * 2 +1), (1, 1), padding=(k, k))
-        mask = nnf.interpolate(mask, size=(x_t.shape[2:]))
-        mask = mask / mask.max(2, keepdims=True)[0].max(3, keepdims=True)[0]
-        mask = mask.gt(self.threshold)
-        mask = (mask[:1] + mask[1:]).float()
-        x_t = x_t[:1] + mask * (x_t - x_t[:1])
-        return x_t
-       
-    def __init__(self, prompts: List[str], words: [List[List[str]]], threshold=.3):
-        alpha_layers = torch.zeros(len(prompts),  1, 1, 1, 1, MAX_NUM_WORDS)
-        for i, (prompt, words_) in enumerate(zip(prompts, words)):
-            if type(words_) is str:
-                words_ = [words_]
-            for word in words_:
-                ind = ptp_utils.get_word_inds(prompt, word, tokenizer)
-                alpha_layers[i, :, :, :, :, ind] = 1
-        self.alpha_layers = alpha_layers.to(device)
-        self.threshold = threshold
 
 class AttentionControl(abc.ABC):
     
@@ -117,61 +91,6 @@ class AttentionStore(AttentionControl):
         super(AttentionStore, self).__init__()
         self.step_store = self.get_empty_store()
         self.attention_store = {}
-
-        
-class AttentionControlEdit(AttentionStore, abc.ABC):
-    
-    def step_callback(self, x_t):
-        if self.local_blend is not None:
-            x_t = self.local_blend(x_t, self.attention_store)
-        return x_t
-        
-    def replace_self_attention(self, attn_base, att_replace):
-        if att_replace.shape[2] <= 16 ** 2:
-            return attn_base.unsqueeze(0).expand(att_replace.shape[0], *attn_base.shape)
-        else:
-            return att_replace
-    
-    @abc.abstractmethod
-    def replace_cross_attention(self, attn_base, att_replace):
-        raise NotImplementedError
-    
-    def forward(self, attn, is_cross: bool, place_in_unet: str):
-        super(AttentionControlEdit, self).forward(attn, is_cross, place_in_unet)
-        if is_cross or (self.num_self_replace[0] <= self.cur_step < self.num_self_replace[1]):
-            h = attn.shape[0] // (self.batch_size)
-            attn = attn.reshape(self.batch_size, h, *attn.shape[1:])
-            attn_base, attn_repalce = attn[0], attn[1:]
-            if is_cross:
-                alpha_words = self.cross_replace_alpha[self.cur_step]
-                attn_repalce_new = self.replace_cross_attention(attn_base, attn_repalce) * alpha_words + (1 - alpha_words) * attn_repalce
-                attn[1:] = attn_repalce_new
-            else:
-                attn[1:] = self.replace_self_attention(attn_base, attn_repalce)
-            attn = attn.reshape(self.batch_size * h, *attn.shape[2:])
-        return attn
-    
-    def __init__(self, prompts, num_steps: int,
-                 cross_replace_steps: Union[float, Tuple[float, float], Dict[str, Tuple[float, float]]],
-                 self_replace_steps: Union[float, Tuple[float, float]],
-                 local_blend: Optional[LocalBlend]):
-        super(AttentionControlEdit, self).__init__()
-        self.batch_size = len(prompts)
-        self.cross_replace_alpha = ptp_utils.get_time_words_attention_alpha(prompts, num_steps, cross_replace_steps, tokenizer).to(device)
-        if type(self_replace_steps) is float:
-            self_replace_steps = 0, self_replace_steps
-        self.num_self_replace = int(num_steps * self_replace_steps[0]), int(num_steps * self_replace_steps[1])
-        self.local_blend = local_blend
-
-class AttentionReplace(AttentionControlEdit):
-
-    def replace_cross_attention(self, attn_base, att_replace):
-        return torch.einsum('hpw,bwn->bhpn', attn_base, self.mapper)
-      
-    def __init__(self, prompts, num_steps: int, cross_replace_steps: float, self_replace_steps: float,
-                 local_blend: Optional[LocalBlend] = None):
-        super(AttentionReplace, self).__init__(prompts, num_steps, cross_replace_steps, self_replace_steps, local_blend)
-        self.mapper = seq_aligner.get_replacement_mapper(prompts, tokenizer).to(device)
 
 def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)):
     h, w, c = image.shape
@@ -279,6 +198,8 @@ class AttentionStore(AttentionControl):
         else:
             for key in self.attention_store:
                 for i in range(len(self.attention_store[key])):
+                    print(self.attention_store[key][i].shape)
+                    print(self.step_store[key][i].shape)
                     self.attention_store[key][i] += self.step_store[key][i]
         self.step_store = self.get_empty_store()
 
@@ -327,7 +248,7 @@ def aggregate_attention(prompts, attention_store: AttentionStore, res: int, from
     num_pixels = res ** 2
 
     for location in from_where:
-
+        
         for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
             if item.shape[1] == num_pixels:
                 cross_maps = item.reshape(len(prompts), -1, res, res, item.shape[-1])[select]
@@ -439,10 +360,13 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
 kl = torch.nn.KLDivLoss()
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,guide=False, sigma=1):
     
-    latents_input = torch.cat([latents] * 2)
-    latents_input = scheduler.scale_model_input(latents_input, t)
-    noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
-    noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
+    #latents_input = torch.cat([latents] * 2)
+    #latents_input = scheduler.scale_model_input(latents_input, t)
+    
+    noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+    noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
+    #noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
+    #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
 
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
 
@@ -450,6 +374,7 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     
     if controller != None:
         latents = controller.step_callback(latents)
+        
         
     
     return latents, noise_pred
@@ -509,12 +434,13 @@ def register_attention_control(model, controller, attns = None):
             #pww
             if attns != None:
                 additional_attn = attns[f'{sim.shape[1]}']
-
+                additional_attn = torch.cat([additional_attn,additional_attn])
+            
             # attention, what we cannot get enough of
             attn = F.softmax(sim + w * additional_attn,dim=-1)
             
             attn = controller(attn, is_cross, place_in_unet)
-
+            
             out = torch.einsum("b i j, b j d -> b i d", attn, v)
 
             out = reshape_batch_dim_to_heads(self, out)
@@ -588,11 +514,13 @@ def save_tensor_as_image(image, path, plot=False):
     else:
         cv2.imwrite(path, saved)
 
-def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps):
+def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, guide = False, mask_index = 0, prompt = "", controller = None, lossF = None, ht = None):
+    latents.requires_grad_(True)
     
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
-    for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
+    lambd = torch.linspace(1, 0, num_inference_steps // 2)
+    for i in tqdm(range(1, num_inference_steps // 2), total=num_inference_steps-1):
 
         # We'll skip the final iteration
         if i >= num_inference_steps - 1: continue
@@ -600,26 +528,47 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
         t = timesteps[i]
 
         # Expand the latents if we are doing classifier free guidance
-        latent_model_input = torch.cat([latents] * 2)
-        latent_model_input = scheduler.scale_model_input(latent_model_input, t)
-
+        #latent_model_input = torch.cat([latents] * 2)
+        #latent_model_input = latents
+        #latent_model_input = scheduler.scale_model_input(latent_model_input, t)
+        noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+        noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
         # Predict the noise residual
-        noise_pred = unet(latent_model_input, t, encoder_hidden_states=context).sample
+        #noise_pred = unet(latent_model_input, t, encoder_hidden_states=context).sample
 
-        
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
+        #noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
 
         current_t = max(0, t.item() - (1000//num_inference_steps)) #t
         next_t = t # t+1
         alpha_t = scheduler.alphas_cumprod[current_t]
         alpha_t_next = scheduler.alphas_cumprod[next_t]
-
+        
         # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
         latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
-        intermediate_latents.append(latents)
+        
+        if guide and i < num_inference_steps // 2:
+            attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+            s_hat = attention_maps16[:,:,mask_index]
+
+            l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
             
-    return torch.cat(intermediate_latents)
+            loss = l1 #sum(losses)
+            loss.backward()
+            
+            grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
+            eta = 0.1
+            latents = latents - eta * lambd[i]  * grad_x
+                
+               
+            context = context.detach()
+            latents = latents.detach()
+            latents.requires_grad_(True)
+        intermediate_latents.append(latents)
+        
+            
+    return intermediate_latents
 
 def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt):
     text_input = tokenizer(

@@ -79,7 +79,7 @@ if args.guide:
     x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
     ht.requires_grad = False
 controller = AttentionStore()
-register_attention_control(unet, controller, new_attn)
+register_attention_control(unet, controller, None)
 
 #x_0 = torch.zeros((64,64), device=device, dtype=MODEL_TYPE)
 #if args.guide:
@@ -110,7 +110,7 @@ uncond_input = tokenizer(
 uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
 
 
-context = [uncond_embeddings, text_emb]
+context = torch.cat([uncond_embeddings, text_emb])
 guidance_scale = 3
 
 for param in unet.parameters():
@@ -193,8 +193,6 @@ for t in tqdm(scheduler.timesteps):
                 #TODO controlla oggetti piccoli
                 #TODO pipeline sperimentale con pochi prompt
                 #TODO Cosa succede quando si usano più maschere
-                #TODO Prendi un'immagine senza oggetti la inverti poi aggiungi un oggetto
-                #TODO Net using only variance and mean of gaussian
                 
                 l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
                 
@@ -209,8 +207,7 @@ for t in tqdm(scheduler.timesteps):
                 latents = latents2 - eta * lambd[step]  * grad_x
                 
                
-            context[0] = context[0].detach()
-            context[1] = context[1].detach()
+            context = context.detach()
             latents = latents.detach()
             latents.requires_grad_(True)
     else:
