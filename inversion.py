@@ -102,7 +102,7 @@ def sample(prompt, start_step=0, start_latents=None,
         direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*noise_pred
         latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt'''
         
-        if guide and i < num_inference_steps // 2:
+        if guide and num_inference_steps // 2 < i < num_inference_steps:
             latents2, _ = diffusion_step(unet, scheduler, controller, latents, text_embeddings, t, guidance_scale)
             #latents2 = pipe.scheduler.step(noise_pred, t, latents).prev_sample
             #latents2 = controller.step_callback(latents2)
@@ -110,7 +110,7 @@ def sample(prompt, start_step=0, start_latents=None,
             
             attention_maps = attention_maps16.to(torch.float) 
             s_hat = attention_maps[:,:,mask_index] 
-            save_tensor_as_image(ht,"ht2.png", plot = True)
+            
             save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
             l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
            
@@ -177,7 +177,7 @@ inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50,
                             prompt=prompt,guide=args.guide)
 
 
-start_step = 10
+start_step = 25
 #rec_latents = latent2image(inverted_latents[-1].unsqueeze(0)
 with torch.no_grad():
     rec_image = sample(prompt,start_latents=inverted_latents[-(start_step+1)][None][0], \
