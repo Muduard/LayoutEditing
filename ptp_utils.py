@@ -198,8 +198,7 @@ class AttentionStore(AttentionControl):
         else:
             for key in self.attention_store:
                 for i in range(len(self.attention_store[key])):
-                    print(self.attention_store[key][i].shape)
-                    print(self.step_store[key][i].shape)
+                    
                     self.attention_store[key][i] += self.step_store[key][i]
         self.step_store = self.get_empty_store()
 
@@ -358,7 +357,7 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
     view_images(np.stack(images, axis=0),file_path=out_path)
 
 kl = torch.nn.KLDivLoss()
-def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = None, m=None, train = False,guide=False, sigma=1):
+def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale):
     
     #latents_input = torch.cat([latents] * 2)
     #latents_input = scheduler.scale_model_input(latents_input, t)
@@ -519,25 +518,18 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
     
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
-    lambd = torch.linspace(1, 0, num_inference_steps // 2)
-    for i in tqdm(range(1, num_inference_steps // 2), total=num_inference_steps-1):
-
+    lambd = torch.linspace(1, 0, num_inference_steps)
+    for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
+        controller.reset()
         # We'll skip the final iteration
         if i >= num_inference_steps - 1: continue
 
         t = timesteps[i]
 
-        # Expand the latents if we are doing classifier free guidance
-        #latent_model_input = torch.cat([latents] * 2)
-        #latent_model_input = latents
-        #latent_model_input = scheduler.scale_model_input(latent_model_input, t)
+        latents = scheduler.scale_model_input(latents, t)
         noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
         noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
-        # Predict the noise residual
-        #noise_pred = unet(latent_model_input, t, encoder_hidden_states=context).sample
-
-        #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
-        #noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        
         noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
 
         current_t = max(0, t.item() - (1000//num_inference_steps)) #t
@@ -546,26 +538,31 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
         alpha_t_next = scheduler.alphas_cumprod[next_t]
         
         # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
-        latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+        latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
         
-        if guide and i < num_inference_steps // 2:
+        if guide and i < num_inference_steps//2:
             attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
             s_hat = attention_maps16[:,:,mask_index]
-
+            save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
+            s_hat = s_hat.to(dtype=torch.float)
             l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
             
             loss = l1 #sum(losses)
             loss.backward()
-            
+            print(loss)
             grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-            eta = 0.1
-            latents = latents - eta * lambd[i]  * grad_x
+            
+            eta = 1
+            latents = latents2 - eta * lambd[i]  * grad_x
                 
                
             context = context.detach()
             latents = latents.detach()
             latents.requires_grad_(True)
-        intermediate_latents.append(latents)
+        else:
+            latents2 = latents2.detach()
+            latents = latents2
+        intermediate_latents.append(latents.detach())
         
             
     return intermediate_latents

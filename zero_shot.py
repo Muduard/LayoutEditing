@@ -152,7 +152,7 @@ for t in tqdm(scheduler.timesteps):
     if args.guide:
         x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
     to_train = False
-    if  0 <= step < timesteps // 2 and args.guide:
+    if  step < timesteps // 2 and args.guide:
         
         if step < timesteps // 2:
             to_train = True
@@ -167,7 +167,7 @@ for t in tqdm(scheduler.timesteps):
                 latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
             else:
                 
-                latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale, xt = x_k, m = mask, train = to_train,sigma=sigma[step], guide=args.guide)
+                latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, context, t)
                 
                 attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
                 attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
@@ -177,8 +177,7 @@ for t in tqdm(scheduler.timesteps):
                 
                 s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
                 
-                attn_replace = torch.clone(attention_maps)
-                attn_replace[:, :, mask_index] = ht
+                
                 save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
                 losses = []
                 
