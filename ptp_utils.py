@@ -415,30 +415,34 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
     
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
-    lambd = torch.linspace(1, 0, num_inference_steps)
+    lambd = torch.linspace(1, 0, num_inference_steps//2)
     for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
-        
+        if guide:
+            controller.reset()
         # We'll skip the final iteration
         if i >= num_inference_steps - 1: continue
         if i > num_inference_steps // 2: latents.requires_grad_(True)
         t = timesteps[i]
 
         latents = scheduler.scale_model_input(latents, t)
-        noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
-        noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
         
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-        
-        current_t = max(0, t.item() - (1000//num_inference_steps)) #t
-        next_t = t # t+1
-        alpha_t = scheduler.alphas_cumprod[current_t]
-        alpha_t_next = scheduler.alphas_cumprod[next_t]
         
         # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
-        latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+        #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
         
-        if guide and i < num_inference_steps // 2:
-            attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+        if guide and  num_inference_steps // 2 < i < num_inference_steps:
+            noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+            noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
+            
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+            
+            current_t = max(0, t.item() - (1000//num_inference_steps)) #t
+            next_t = t # t+1
+            alpha_t = scheduler.alphas_cumprod[current_t]
+            alpha_t_next = scheduler.alphas_cumprod[next_t]
+
+
+            attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
             s_hat = attention_maps16[:,:,mask_index]
             save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
             s_hat = s_hat.to(dtype=torch.float)
@@ -449,16 +453,32 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             print(loss)
             grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
             
-            eta = 1
-            latents = latents2 - eta * lambd[i]  * grad_x
+            eta = 0.6
+            p_t = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt())
+            noise_pred = noise_pred - eta * lambd[-num_inference_steps // 2 + i] * grad_x
+            
+            d_t =  (1-alpha_t_next).sqrt()*noise_pred
+            latents = p_t + d_t
+            #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+            #latents = latents2 - eta * lambd[i]  * grad_x
                 
                
             context = context.detach()
             latents = latents.detach()
             latents.requires_grad_(True)
         else:
-            latents2 = latents2.detach()
-            latents = latents2
+            with torch.no_grad():
+                noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+                noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
+                
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+                
+                current_t = max(0, t.item() - (1000//num_inference_steps)) #t
+                next_t = t # t+1
+                alpha_t = scheduler.alphas_cumprod[current_t]
+                alpha_t_next = scheduler.alphas_cumprod[next_t]
+                latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+            
         torch.save(latents,f'inversion/{num_inference_steps - i}.pt')
         intermediate_latents.append(latents.detach())
         
