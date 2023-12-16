@@ -468,10 +468,10 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             latents.requires_grad_(True)
         else:
             with torch.no_grad():
-                noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+                #noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
                 noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
-                
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+                noise_pred = noise_prediction_text
+                #noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
                 
                 current_t = max(0, t.item() - (1000//num_inference_steps)) #t
                 next_t = t # t+1

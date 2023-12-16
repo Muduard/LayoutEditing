@@ -134,8 +134,9 @@ m = torch.nn.Sigmoid()
 
 
 delta = torch.zeros_like(latents)
-delta.retain_grad()
 delta.requires_grad_(True)
+delta.retain_grad()
+
 latents.requires_grad = False
 
 mask = torch.ones_like(latents)
@@ -150,24 +151,25 @@ if args.guide:
 theta = torch.linspace(0.7, 1, timesteps//2)
 sigma = torch.linspace(0.1, 0.1, timesteps//2)
 #mask = torch.ones((64,64), device=noise.device, dtype=MODEL_TYPE)
-opt = torch.optim.SGD([delta])
+#opt = torch.optim.SGD([delta], lr=1.2)
 
 for t in tqdm(scheduler.timesteps):    
     if args.guide:
         x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
     if  step < timesteps // 2 and args.guide:
-        controller.reset()
+        
         
         for i in range(args.resampling_steps + 1):#Resampling
             if args.resampling_steps > 0 and i < args.resampling_steps:
                 t1 = torch.tensor([step+1], device=device)
                 latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
             else:
-                latents2 = latents
+                
                 for grad_step in tqdm(range(args.epochs)):
-                    opt.zero_grad()
-                    latents2 = latents + delta
-                    latents2, _ = diffusion_step(unet, scheduler, controller, latents2, context, t)
+                    
+                    controller.reset()
+                    
+                    latents2, _ = diffusion_step(unet, scheduler, controller, latents + delta, context, t, guidance_scale)
 
                     attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
 
@@ -175,7 +177,7 @@ for t in tqdm(scheduler.timesteps):
                     
                     s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
                     
-                    save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
+                    #save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
                     
                     l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
                     
@@ -184,23 +186,32 @@ for t in tqdm(scheduler.timesteps):
                     
                     loss = l1#sum(losses)
                     loss.backward()
+                    print(loss)
+                    delta = delta - 0.01 * delta.grad
+                    context = context.detach()
+                    latents2 = latents2.detach()
+                    delta = delta.detach()
+                    delta.requires_grad_(True)
                     
-                    opt.step()
                 
                 noise_pred = diffusion_step2(latents2, t, context)
+
+                attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
+                attention_maps = attention_maps16.to(torch.float) 
+                save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
 
                 prev_t = max(1, t.item() - (1000//timesteps)) # t-1
                 alpha_t = scheduler.alphas_cumprod[t.item()]
                 alpha_t_prev = scheduler.alphas_cumprod[prev_t]
                 
-                predicted_x0 = (latents - (1-alpha_t).sqrt()*noise_pred) / alpha_t.sqrt() + delta
-                noise_pred = noise_pred - (alpha_t_prev / (1 - alpha_t_prev)).sqrt() * delta
+                predicted_x0 = (latents - (1-alpha_t).sqrt()*noise_pred) / alpha_t.sqrt() 
+                noise_pred = noise_pred - (alpha_t_prev / (1 - alpha_t_prev)).sqrt()
                 direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*noise_pred
-                latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt
-            
+                latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt + delta
+                context = context.detach()
+                latents = latents.detach()
                
-            context = context.detach()
-            latents = latents.detach()
+            
             
     else:
         with torch.no_grad():
@@ -214,7 +225,7 @@ for t in tqdm(scheduler.timesteps):
                     attn = torch.where(attn < 0.4, -1, 1)
                     save_tensor_as_image(attn,f"{path_original}{step}.png")
             
-            latents, _ = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=None, m = mask, train=False, guide=args.guide)
+            latents, _ = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale)
             
     step += 1
 
