@@ -139,8 +139,9 @@ def sample(prompt, start_step=0, start_latents=None,
             alpha_t = pipe.scheduler.alphas_cumprod[t.item()]
             alpha_t_prev = pipe.scheduler.alphas_cumprod[prev_t]
 
+            
+            noise_pred = noise_pred + (1-alpha_t).sqrt() * grad_x
             predicted_x0 = (latents - (1-alpha_t).sqrt()*noise_pred) / alpha_t.sqrt()
-            noise_pred = noise_pred - (1-alpha_t).sqrt() * grad_x
             direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*noise_pred
             latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt
             text_embeddings = text_embeddings.detach()
