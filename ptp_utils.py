@@ -512,3 +512,22 @@ def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt):
     uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
     context = torch.cat([uncond_embeddings, text_emb])
     return context
+
+#TODO test projection
+
+def project_attention(attn, v, layer):
+    inner_dim = v.shape[-1]
+    head_dim = inner_dim // layer.heads
+    hidden_states = attn @ v
+    ndim = hidden_states.ndim
+    if ndim == 4:
+        batch_size, channel, height, width = hidden_states.shape
+        hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+    hidden_states = hidden_states.transpose(1, 2).reshape(1, -1, attn.heads * head_dim)
+    hidden_states = hidden_states.to(v.dtype)
+    # linear proj
+    hidden_states = layer.to_out[0](hidden_states)
+    
+    if ndim == 4:
+        hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+    

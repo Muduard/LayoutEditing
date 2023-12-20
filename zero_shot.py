@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image
 import cv2
 import argparse
-from accelerate import Accelerator
 import numpy as np
 import torch.nn.functional as F
 
@@ -87,7 +86,7 @@ register_attention_control(unet, controller, None)
 #    x_0 = cv2.imread(args.out_path + "x0.png")
 #    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
-prompts = ["A cat hiding under a sofa"]
+prompts = ["A cat on the table"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
 
@@ -189,8 +188,9 @@ for t in tqdm(scheduler.timesteps):
                     l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
                         + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
                     losses.append(l)'''
-                #TODO loss sulla similarità delle attenzioni
+                #TODO loss sulla similarità delle attenzioni, prova a inserire l'attenzione
                 #TODO Cosa succede quando si usano più maschere
+                #TODO lower memory cost
                 
                 l1 = 0.4 * lossF(s_hat,ht)
                 
