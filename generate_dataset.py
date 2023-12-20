@@ -4,7 +4,7 @@ from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, StableDi
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image
+from ptp_utils import diffusion_step,latent2image,compute_embeddings
 import cv2
 import argparse
 import numpy as np
@@ -90,25 +90,11 @@ for caption in tqdm(captions[8:]):
     
     print(caption)
     latents = torch.clone(noise)
-    text_input = tokenizer(
-            caption,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-
-    text_emb = text_encoder(text_input.input_ids.to(device))[0]
-
-    max_length = text_input.input_ids.shape[-1]
-    uncond_input = tokenizer(
-            [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
-    )
-    uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
-    context = torch.cat([uncond_embeddings, text_emb])
+    context = compute_embeddings(tokenizer, text_encoder, device, 1, caption)
     for t in tqdm(scheduler.timesteps):
         
         with torch.no_grad():
+            
             latents, _ = diffusion_step(unet, scheduler,None, latents, context, t, guidance_scale)
             #noise_pred = unet(latents, t, encoder_hidden_states=context[1])["sample"]
             #latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
