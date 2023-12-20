@@ -168,7 +168,7 @@ for t in tqdm(scheduler.timesteps):
                 latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
             else:
                 
-                latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
+                latents2, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
                 
                 attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
                 #attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
