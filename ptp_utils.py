@@ -410,9 +410,18 @@ def save_tensor_as_image(image, path, plot=False):
     else:
         cv2.imwrite(path, saved)
 
-def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, guide = False, mask_index = 0, prompt = "", controller = None, lossF = None, ht = None):
-    latents.requires_grad_(True)
+def p_t(x_t, alpha_t, eps_t):
+    return (x_t - (1-alpha_t).sqrt()*eps_t) / alpha_t.sqrt()
     
+def d_t(alpha_t_prev, eps_t):
+    return (1-alpha_t_prev).sqrt()*eps_t
+
+
+
+
+def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, guide = False, mask_index = 0, prompt = "", controller = None, lossF = None, ht = None, mask=None):
+    latents.requires_grad_(True)
+    z_0 = latents.clone()
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
     lambd = torch.linspace(1, 0, num_inference_steps//2)
@@ -426,7 +435,8 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
 
         latents = scheduler.scale_model_input(latents, t)
         
-        
+        #TODO check definition of pointing to x_t
+        #TODO try cosine scheduling
         # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
         #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
         
@@ -453,12 +463,13 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             print(loss)
             grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
             
-            eta = 0.6
-            p_t = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt())
-            noise_pred = noise_pred - eta * lambd[-num_inference_steps // 2 + i] * grad_x
+            eta = 0.3
+            hatz_0 = p_t(latents, alpha_t, noise_pred)* alpha_t_next.sqrt()
+            hatz_0 = hatz_0 - eta * (1 - mask) * (hatz_0 - z_0)
+            noise_pred = noise_pred - eta * (1-alpha_t).sqrt() * grad_x
             
-            d_t =  (1-alpha_t_next).sqrt()*noise_pred
-            latents = p_t + d_t
+            direction =  d_t(alpha_t_next, noise_pred)
+            latents = hatz_0 + direction
             #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
             #latents = latents2 - eta * lambd[i]  * grad_x
                 

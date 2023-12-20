@@ -14,10 +14,10 @@ import torch.nn.functional as F
 
 
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-repo_id =  "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
+repo_id =  "CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
-parser.add_argument('--mask', default="new_mask.png",
+parser.add_argument('--mask', default="cat3.png",
                     help='Target mask of layout editing')
 parser.add_argument('--res_size', default=16, type=int,
                     help='Resolution size to edit')
@@ -37,7 +37,7 @@ parser.add_argument('--prompt', default="A cat with a city in the background",
 parser.add_argument('--mask_index', nargs='+', help='List of token indices to move with a mask')
 parser.add_argument("--mask_path", type=str, help="Path of masks as image files with the name of the corresponding token")
 parser.add_argument("--resampling_steps", type=int, default=0, help="Resample noise for better coherence")
-parser.add_argument("--seed", type=int, default=24)
+parser.add_argument("--seed", type=int, default=82)
 
 MODEL_TYPE = torch.float16
 
@@ -66,12 +66,13 @@ h = None
 new_attn = None
 
 if args.guide:
-    original_mask = cv2.imread(f'{path_original}26.png', cv2.IMREAD_GRAYSCALE)
-    original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-    new_mask = torch.roll(original_mask,shifts=6, dims=1)
-    new_mask = torch.where(new_mask < 0.4, -1, 1)
-    save_tensor_as_image(new_mask, args.mask)
+    #original_mask = cv2.imread(f'{args.mask}', cv2.IMREAD_GRAYSCALE)
+    #original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
+    #new_mask = torch.roll(original_mask,shifts=6, dims=1)
+    #new_mask = torch.where(new_mask < 0.4, -1, 1)
+    #save_tensor_as_image(new_mask, args.mask)
     h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
+    original_mask = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
     new_attn = get_multi_level_attention_from_average(h, device)
     hr = cv2.resize(h, (args.res_size, args.res_size))
     cv2.imwrite(args.out_path + "hr.png", hr)
@@ -86,7 +87,7 @@ register_attention_control(unet, controller, None)
 #    x_0 = cv2.imread(args.out_path + "x0.png")
 #    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
-prompts = ["A cat with a city in the background and a little mouse"]
+prompts = ["A cat hiding under a sofa"]
 timesteps = 50
 scheduler.set_timesteps(timesteps)
 
@@ -145,7 +146,7 @@ if args.guide:
 
 
 theta = torch.linspace(0.7, 1, timesteps//2)
-sigma = torch.linspace(0.1, 0.1, timesteps//2)
+sigma = torch.linspace(0.1, 0., timesteps//2)
 #mask = torch.ones((64,64), device=noise.device, dtype=MODEL_TYPE)
 
 for t in tqdm(scheduler.timesteps):    
@@ -167,11 +168,11 @@ for t in tqdm(scheduler.timesteps):
                 latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
             else:
                 
-                latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, context, t)
+                latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
                 
                 attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
-                attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
-                attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
+                #attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
+                #attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
                 
                 attention_maps = attention_maps16.to(torch.float) 
                 
@@ -189,21 +190,21 @@ for t in tqdm(scheduler.timesteps):
                         + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
                     losses.append(l)'''
                 #TODO loss sulla similarità delle attenzioni
-                #TODO controlla oggetti piccoli
-                #TODO pipeline sperimentale con pochi prompt
                 #TODO Cosa succede quando si usano più maschere
                 
-                l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
+                l1 = 0.4 * lossF(s_hat,ht)
                 
-                l2 = 100 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+                l2 = 1 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
                 #l3 = 0.05 * (x_k - latents2).max()
+                l3 = 0.1 * sigma[step] * torch.norm(latents2 - x_k)
+                l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
                 
-                loss = 2 * l1 + l2#sum(losses)
+                loss = l4 + l2 + l3#sum(losses)
                 loss.backward()
                 
-                grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-                eta = 0.1
-                latents = latents2 - eta * lambd[step]  * grad_x
+                grad_x = latents.grad#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
+                eta = 0.3
+                latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
                 
                
             context = context.detach()
@@ -221,7 +222,7 @@ for t in tqdm(scheduler.timesteps):
                     attn = torch.where(attn < 0.4, -1, 1)
                     save_tensor_as_image(attn,f"{path_original}{step}.png")
             
-            latents, _ = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale, xt=None, m = mask, train=False, guide=args.guide)
+            latents, _ = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale)
             
     step += 1
 
