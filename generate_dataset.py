@@ -3,15 +3,14 @@ import torch
 from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from ptp_utils import diffusion_step,latent2image,compute_embeddings
-import cv2
 import argparse
 import numpy as np
 import torch.nn.functional as F
 from torchvision.transforms.functional import to_pil_image
-
-repo_id =  "CompVis/stable-diffusion-v1-4"#"CompVis/stable-diffusion-v1-4"#
+from diffusers.models.attention_processor import AttnProcessor2_0
+from accelerate import PartialState 
+repo_id =  "stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="new_mask.png",
@@ -42,18 +41,23 @@ MODEL_TYPE = torch.float16
 args = parser.parse_args()
 
 os.makedirs("generated/",exist_ok = True)
-device = "cpu"
+device = "cuda"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae",torch_dtype=MODEL_TYPE).to(device)
-tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+distributed_state = PartialState()
 
-scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE)
-#pipe = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4", scheduler=scheduler)
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae",torch_dtype=MODEL_TYPE).to(distributed_state.device)
+tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(distributed_state.device)
+unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(distributed_state.device)
+unet.set_attn_processor(AttnProcessor2_0())
+torch.compile(unet, mode="reduce-overhead", fullgraph=True)
+scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE,prediction_type="v_prediction")
+#pipe = StableDiffusionPipeline.from_pretrained("", scheduler=scheduler)
 #pipe = pipe.to(device)
+
+
 import json
  
 # Opening JSON file
@@ -84,25 +88,32 @@ batch_size = 1
 
 
 guidance_scale = 7.5
-i = 0
-noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) * scheduler.init_noise_sigma
-for caption in tqdm(captions[8:]):
+ 
+
+n_images = len(os.listdir("./generated"))
+print(f"starting from caption {n_images}")
+
+n_images_to_generate = len(captions) - n_images
+cap1 = captions[n_images:n_images_to_generate//2+n_images]
+cap2 = captions[n_images_to_generate//2+n_images:]
+
+with distributed_state.split_between_processes([cap1, cap2]) as prompts:
+    i = 0
+    noise = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) * scheduler.init_noise_sigma
     
-    print(caption)
-    latents = torch.clone(noise)
-    context = compute_embeddings(tokenizer, text_encoder, device, 1, caption)
-    for t in tqdm(scheduler.timesteps):
+    for caption in tqdm(prompts[0]):
         
-        with torch.no_grad():
-            
-            latents, _ = diffusion_step(unet, scheduler,None, latents, context, t, guidance_scale)
-            #noise_pred = unet(latents, t, encoder_hidden_states=context[1])["sample"]
-            #latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-            
-    image = latent2image(vae, latents)
-    
-    image = to_pil_image(image)
-    image.save(f"generated/{i}.png")
-    #cv2.imwrite(f"generated/{i}.png",image)
-    #image.save(f"generated/{i}.png")
-    i+=1
+        latents = torch.clone(noise)
+        context = compute_embeddings(tokenizer, text_encoder, device, 1, caption)
+        for t in scheduler.timesteps:
+            with torch.no_grad():
+                latents, _ = diffusion_step(unet, scheduler,None, latents, context, t, guidance_scale)
+                
+        image = latent2image(vae, latents)
+        
+        image = to_pil_image(image)
+        image.save(f"generated/{distributed_state.process_index}_{i}.png")
+        i+=1
+        #cv2.imwrite(f"generated/{i}.png",image)
+        #image.save(f"generated/{i}.png")
+        
