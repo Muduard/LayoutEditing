@@ -8,7 +8,7 @@ import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
 from tqdm import tqdm
-LOW_RESOURCE = True 
+LOW_RESOURCE = False 
 
 class AttentionControl(abc.ABC):
     
@@ -28,16 +28,17 @@ class AttentionControl(abc.ABC):
 
     def __call__(self, attn, is_cross: bool, place_in_unet: str):
         if self.cur_att_layer >= self.num_uncond_att_layers:
-            if LOW_RESOURCE:
-                attn = self.forward(attn, is_cross, place_in_unet)
-            else:
-                h = attn.shape[0]
-                attn[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
+            #if LOW_RESOURCE:
+            attn = self.forward(attn, is_cross, place_in_unet)
+            #else:
+            #    h = attn.shape[0]
+            #    attn[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
         self.cur_att_layer += 1
         if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:
             self.cur_att_layer = 0
             self.cur_step += 1
             self.between_steps()
+        
         return attn
     
     def reset(self):
@@ -64,7 +65,9 @@ class AttentionStore(AttentionControl):
 
     def forward(self, attn, is_cross: bool, place_in_unet: str):
         key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
+        
         if attn.shape[1] <= 32 ** 2:  # avoid memory overhead
+            
             self.step_store[key].append(attn)
         return attn
 
@@ -78,6 +81,7 @@ class AttentionStore(AttentionControl):
         self.step_store = self.get_empty_store()
 
     def get_average_attention(self):
+        
         average_attention = {key: [item / self.cur_step for item in self.attention_store[key]] for key in self.attention_store}
         return average_attention
 
@@ -138,7 +142,7 @@ def aggregate_attention(prompts, attention_store: AttentionStore, res: int, from
     out = []
     attention_maps = attention_store.get_average_attention()
     num_pixels = res ** 2
-
+    
     for location in from_where:
         
         for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
@@ -152,8 +156,7 @@ def aggregate_attention(prompts, attention_store: AttentionStore, res: int, from
 
 @torch.no_grad()
 def latent2image(vae, latents):
-    latents = 1 / 0.18215 * latents
-    image = vae.decode(latents)['sample']
+    image = vae.decode(latents / vae.config.scaling_factor)['sample']
     image = (image / 2 + 0.5).clamp(0, 1)
     image = image.cpu().permute(0, 2, 3, 1).float().numpy()[0]
     image = (image * 255).astype(np.uint8)
@@ -249,18 +252,35 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
         images.append(image)
     view_images(np.stack(images, axis=0),file_path=out_path)
 
-kl = torch.nn.KLDivLoss()
+
+def lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding):
+    model_pred = unet(
+                    latents,
+                    t,
+                    timestep_cond=w_embedding,
+                    encoder_hidden_states=context,
+                    return_dict=False
+                )[0]
+
+                # compute the previous noisy sample x_t -> x_t-1
+    latents, denoised = scheduler.step(model_pred, t, latents, return_dict=False)
+    if controller != None:
+        
+        latents = controller.step_callback(latents)
+    return latents, denoised
+
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale):
     
     latents = scheduler.scale_model_input(latents, t)
     with torch.no_grad():
         noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+    
     noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
     #noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
     #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
 
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-
+    
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
     
     if controller != None:
@@ -331,9 +351,9 @@ def register_attention_control(model, controller, attns = None):
             attn = F.softmax(sim + w * additional_attn,dim=-1)
             
             attn = controller(attn, is_cross, place_in_unet)
-            
+            print(attn.shape)
             out = torch.einsum("b i j, b j d -> b i d", attn, v)
-
+            
             out = reshape_batch_dim_to_heads(self, out)
             return to_out(out)
 
@@ -351,7 +371,7 @@ def register_attention_control(model, controller, attns = None):
         controller = DummyController()
 
     def register_recr(net_, count, place_in_unet, module_name=None):
-
+        
         if module_name in ["attn1", "attn2"]:
             net_.forward = ca_forward(net_, place_in_unet)
             return count + 1
@@ -532,3 +552,31 @@ def project_attention(attn, v, layer):
     if ndim == 4:
         hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
     
+
+def get_guidance_scale_embedding(w, embedding_dim=512, dtype=torch.float16):
+        """
+        See https://github.com/google-research/vdm/blob/dc27b98a554f65cdc654b800da5aa1846545d41b/model_vdm.py#L298
+
+        Args:
+            timesteps (`torch.Tensor`):
+                generate embedding vectors at these timesteps
+            embedding_dim (`int`, *optional*, defaults to 512):
+                dimension of the embeddings to generate
+            dtype:
+                data type of the generated embeddings
+
+        Returns:
+            `torch.FloatTensor`: Embedding vectors with shape `(len(timesteps), embedding_dim)`
+        """
+        assert len(w.shape) == 1
+        w = w * 1000.0
+
+        half_dim = embedding_dim // 2
+        emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=dtype) * -emb)
+        emb = w.to(dtype)[:, None] * emb[None, :]
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if embedding_dim % 2 == 1:  # zero pad
+            emb = torch.nn.functional.pad(emb, (0, 1))
+        assert emb.shape == (w.shape[0], embedding_dim)
+        return emb

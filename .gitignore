@@ -3,7 +3,10 @@ attentions
 __pycache__
 *.png
 datasets/*
-generated/*
-sample_dir1/*
-sample_dir2/*
+generated*
+sample_dir*
 inversion/*
+datasets
+downloads
+.vscode
+*.txt

@@ -1,19 +1,19 @@
 import os 
 import torch
-from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel
+from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, LCMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image
+from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding
 import cv2
 import argparse
 import numpy as np
 import torch.nn.functional as F
-
+from diffusers.models.attention_processor import AttnProcessor2_0
 
 
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-repo_id =  "CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
+repo_id ="SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="cat3.png",
@@ -56,11 +56,12 @@ tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
-scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float32)
-
+scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+unet.set_attn_processor(AttnProcessor2_0())
+torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = 2
-timesteps = 50
+timesteps = 8
 h = None
 new_attn = None
 
@@ -87,8 +88,7 @@ register_attention_control(unet, controller, None)
 #    x_0 = torch.tensor(x_0, dtype=torch.float, device=device) / 255
 
 prompts = ["A cat on the table"]
-timesteps = 50
-scheduler.set_timesteps(timesteps)
+scheduler.set_timesteps(timesteps, original_inference_steps=50)
 
 batch_size = 1
 torch.manual_seed(args.seed)
@@ -110,8 +110,9 @@ uncond_input = tokenizer(
 uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
 
 
-context = torch.cat([uncond_embeddings, text_emb])
-guidance_scale = 3
+#context = torch.cat([uncond_embeddings, text_emb])
+context = text_emb
+guidance_scale = 8
 
 for param in unet.parameters():
     param.requires_grad = False
@@ -148,71 +149,82 @@ theta = torch.linspace(0.7, 1, timesteps//2)
 sigma = torch.linspace(0.1, 0., timesteps//2)
 #mask = torch.ones((64,64), device=noise.device, dtype=MODEL_TYPE)
 
+w = torch.tensor(guidance_scale - 1).repeat(1)
+w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim).to(
+    device=device, dtype=latents.dtype
+)
+#TODO try to change hyperparameters to see if you can do it in only one step
 for t in tqdm(scheduler.timesteps):    
     if args.guide:
         x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
-    to_train = False
-    if  step < timesteps // 2 and args.guide:
-        
-        if step < timesteps // 2:
-            to_train = True
-        else: 
-            to_train = False
-        
-        controller.reset()
-        
-        for i in range(args.resampling_steps + 1):#Resampling
-            if args.resampling_steps > 0 and i < args.resampling_steps:
-                t1 = torch.tensor([step+1], device=device)
-                latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
-            else:
-                
-                latents2, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
-                
-                attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
-                #attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
-                #attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
-                
-                attention_maps = attention_maps16.to(torch.float) 
-                
-                s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
-                
-                
-                save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
-                losses = []
-                
-                
-                '''for j in range(attention_maps.shape[-1]): 
-                    #l = lossF(s_hat,ht) \
-                    #    + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-                    l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
-                        + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
-                    losses.append(l)'''
-                #TODO loss sulla similarità delle attenzioni, prova a inserire l'attenzione
-                #TODO Cosa succede quando si usano più maschere
-                #TODO lower memory cost
-                
-                l1 = 0.4 * lossF(s_hat,ht)
-                
-                l2 = 1 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
-                #l3 = 0.05 * (x_k - latents2).max()
-                l3 = 0.1 * sigma[step] * torch.norm(latents2 - x_k)
-                l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
-                
-                loss = l4 + l2 + l3#sum(losses)
-                loss.backward()
-                
-                grad_x = latents.grad#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-                eta = 0.3
-                latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
-                
-               
+    
+    if step == timesteps // 2 - 1 and args.guide:
+        for b in range(20):
+            controller.reset()
             context = context.detach()
             latents = latents.detach()
             latents.requires_grad_(True)
+            for i in range(args.resampling_steps + 1):#Resampling
+                if args.resampling_steps > 0 and i < args.resampling_steps:
+                    t1 = torch.tensor([step+1], device=device)
+                    latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
+                else:
+                    latents2, _ = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
+                    #latents2, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
+                    
+                    attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
+                    #attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
+                    #attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
+                    
+                    attention_maps = attention_maps16.to(torch.float) 
+                    
+                    s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
+                    
+                    
+                    save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
+                    losses = []
+                    
+                    
+                    '''for j in range(attention_maps.shape[-1]): 
+                        #l = lossF(s_hat,ht) \
+                        #    + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
+                        l = lossF(attention_maps[:,:,j],attn_replace[:,:,j]) \
+                            + lossF(attention_maps[:,:,j] / torch.linalg.norm(attention_maps[:,:,j], ord=np.inf), attn_replace[:,:,j])
+                        losses.append(l)'''
+                    #TODO loss sulla similarità delle attenzioni, prova a inserire l'attenzione
+                    #TODO Cosa succede quando si usano più maschere
+                    #TODO lower memory cost
+                    if True:
+                        l1 = 1 * lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
+                        
+                        l2 = 1 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+                        #l3 = 0.05 * (x_k - latents2).max()
+                        l3 = 0.1 * sigma[step] * torch.norm(latents2 - x_k)
+                        l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
+                        
+                        loss = l1#sum(losses)
+                        loss.backward()
+                        
+                        grad_x = latents.grad / torch.abs(latents.grad).max()
+                        eta = 0.3
+                    else:
+                        l1 = 2 * lossF(s_hat,ht)
+                        
+                        l2 = 1 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+                        #l3 = 0.05 * (x_k - latents2).max()
+                        l3 = 0.1 * sigma[step] * torch.norm(latents2 - x_k)
+                        l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
+                        
+                        loss = l1#sum(losses)
+                        loss.backward()
+                        
+                        grad_x = latents.grad
+                        eta = 0.2
+                    latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
+                    
     else:
         with torch.no_grad():
-            to_train = False
+            
             if not args.guide:
                 torch.save(latents, f'{path_original}{step}.pt')
                 if step == timesteps // 2 + 1:
@@ -222,7 +234,7 @@ for t in tqdm(scheduler.timesteps):
                     attn = torch.where(attn < 0.4, -1, 1)
                     save_tensor_as_image(attn,f"{path_original}{step}.png")
             
-            latents, _ = diffusion_step(unet,scheduler, controller, latents, context, t, guidance_scale)
+            latents, _ = lcm_diffusion_step(unet,scheduler, controller, latents, context, t, w_embedding)
             
     step += 1
 
