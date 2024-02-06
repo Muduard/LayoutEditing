@@ -290,6 +290,9 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     
     return latents, noise_pred
 
+
+
+
 def register_attention_control(model, controller, attns = None):
     def ca_forward(self, place_in_unet):
         to_out = self.to_out
@@ -319,7 +322,7 @@ def register_attention_control(model, controller, attns = None):
             x = hidden_states
             context = encoder_hidden_states
             mask = attention_mask
-
+            
             batch_size, sequence_length, dim = x.shape
             h = self.heads
             q = self.to_q(x)
@@ -351,7 +354,7 @@ def register_attention_control(model, controller, attns = None):
             attn = F.softmax(sim + w * additional_attn,dim=-1)
             
             attn = controller(attn, is_cross, place_in_unet)
-            print(attn.shape)
+            
             out = torch.einsum("b i j, b j d -> b i d", attn, v)
             
             out = reshape_batch_dim_to_heads(self, out)
@@ -398,12 +401,15 @@ def bw_hook(module, grad_input, grad_output):
 def fw_hook(module, input, output):
     W = module.to_out[0].weight
     b = module.to_out[0].bias
-    reconstructed_input = torch.matmul((output - b).to(torch.float), torch.inverse(W.T.to(torch.float)))
-    print(reconstructed_input.shape)
+    print(input[0].shape)
+    print(module)
     print(output.shape)
+    #reconstructed_input = torch.matmul((output - b).to(torch.float), torch.inverse(W.T.to(torch.float)))
+    #print(reconstructed_input.shape)
+    #print(output.shape)
 
 
-def register_hook(net_, count, place_in_unet, module_name=None):
+def register_hook(net_, count, place_in_unet, module_name=None, saved_modules=[]):
     if module_name in ["attn1", "attn2"]:
 
         net_.register_forward_hook(fw_hook)
@@ -414,6 +420,17 @@ def register_hook(net_, count, place_in_unet, module_name=None):
             count = register_hook(net__, count, place_in_unet, module_name=k)
     return count
 
+def get_attn_layers(model):
+    queue = list(model.named_children())
+    attn_layers = []
+
+    for module_name, children in queue:
+        if module_name in ["attn1", "attn2"]:
+            attn_layers.append(children)
+        else:
+            queue.extend(list(children.named_children()) )
+
+    return attn_layers
 def save_tensor_as_image(image, path, plot=False):
     saved = image.clone()
     saved = saved / saved.max()

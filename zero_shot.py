@@ -4,7 +4,7 @@ from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, LCMSched
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding
+from ptp_utils import AttentionStore,get_attn_layers,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding, register_hook
 import cv2
 import argparse
 import numpy as np
@@ -61,7 +61,7 @@ unet.set_attn_processor(AttnProcessor2_0())
 torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = 2
-timesteps = 8
+timesteps = 20
 h = None
 new_attn = None
 
@@ -81,6 +81,7 @@ if args.guide:
     ht.requires_grad = False
 controller = AttentionStore()
 register_attention_control(unet, controller, None)
+register_hook(unet, 0, '')
 
 #x_0 = torch.zeros((64,64), device=device, dtype=MODEL_TYPE)
 #if args.guide:
@@ -153,13 +154,40 @@ w = torch.tensor(guidance_scale - 1).repeat(1)
 w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim).to(
     device=device, dtype=latents.dtype
 )
+
+attn_layers = get_attn_layers(unet)
+
+obj_attentions = []
+
+def reshape_heads_to_batch_dim(self, tensor):
+            batch_size, seq_len, dim = tensor.shape
+            head_size = self.heads
+            tensor = tensor.reshape(batch_size, seq_len, head_size, dim // head_size)
+            tensor = tensor.permute(0, 2, 1, 3).reshape(batch_size * head_size, seq_len, dim // head_size)
+            return tensor
+
+
+'''for attn_module in attn_layers:
+    if attn_module.to_v.in_features == 768:
+        v = attn_module.to_v(context)
+        v = reshape_heads_to_batch_dim(attn_module, v)
+        obj_attn = torch.zeros()
+        out = torch.einsum("b i j, b j d -> b i d", ht, v)
+        print(out.shape)
+        out = attn_module.to_out(out)
+        out = reshape_batch_dim_to_heads(self, out)
+        print(out.shape)
+        obj_attentions.append(out)'''
+
+
+
 #TODO try to change hyperparameters to see if you can do it in only one step
 for t in tqdm(scheduler.timesteps):    
     if args.guide:
         x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
     
     if step == timesteps // 2 - 1 and args.guide:
-        for b in range(20):
+        #for b in range(20):
             controller.reset()
             context = context.detach()
             latents = latents.detach()
@@ -177,7 +205,7 @@ for t in tqdm(scheduler.timesteps):
                     #attention_maps64, _ = get_cross_attention(prompts, controller, res=64, from_where=["up", "down"])
                     
                     attention_maps = attention_maps16.to(torch.float) 
-                    
+                    print(attention_maps.shape)
                     s_hat = attention_maps[:,:,mask_index]  #torch.mean(attention_maps,dim=-1)
                     
                     
