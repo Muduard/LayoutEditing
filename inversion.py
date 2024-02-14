@@ -54,18 +54,8 @@ vae = pipe.vae
 tokenizer = pipe.tokenizer
 text_encoder = pipe.text_encoder
 unet = pipe.unet
-lossF = torch.nn.BCELoss()
 
 torch.manual_seed(42)
-
-def diffusion_step2(latents, t, text_embeddings, guidance_scale):
-    noise_pred_uncond = unet(latents, t, encoder_hidden_states=text_embeddings[0].unsqueeze(0))["sample"]
-    noise_prediction_text = unet(latents, t, encoder_hidden_states=text_embeddings[1].unsqueeze(0))["sample"]
-    noise_pred = noise_prediction_text#noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-    
-    
-    return noise_pred
-
 
 def p_t(x_t, alpha_t, eps_t):
     return (x_t - (1-alpha_t).sqrt()*eps_t) / alpha_t.sqrt()
@@ -73,17 +63,9 @@ def p_t(x_t, alpha_t, eps_t):
 def d_t(alpha_t_prev, eps_t):
     return (1-alpha_t_prev).sqrt()*eps_t
 
-def sample(prompt, start_step=0, start_latents=None,
-           guidance_scale=3.5, num_inference_steps=30,
-           num_images_per_prompt=1, do_classifier_free_guidance=True,
-           negative_prompt='', device=device, guide = False, 
-           mask_index = 0, controller = None, lossF = None, ht = None):
+def sample(start_step=0, start_latents=None,
+           guidance_scale=3.5, num_inference_steps=30,device=device):
   
-    # Encode prompt
-    with torch.no_grad():
-        text_embeddings = pipe._encode_prompt(
-                prompt, device, num_images_per_prompt, do_classifier_free_guidance, negative_prompt
-        )
 
     # Set num inference steps
     pipe.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -93,74 +75,13 @@ def sample(prompt, start_step=0, start_latents=None,
         start_latents = torch.randn(1, 4, 64, 64, device=device)
         start_latents *= pipe.scheduler.init_noise_sigma
 
-
-    hsteps = num_inference_steps // 2
-
     latents = start_latents.clone()
-    if guide:
-        latents.requires_grad_(True)
-        latents.retain_grad()
-    lambd = torch.linspace(1, 0, hsteps)
-    t_cond = num_inference_steps // 1.5
-    first_grad = 0
 
     for i in tqdm(range(start_step, num_inference_steps)):
-        if guide:
-            controller.reset()
-        
         t = pipe.scheduler.timesteps[i]
-        for j in range(args.resampling_steps + 1):#Resampling
-            if args.resampling_steps > 0 and j < args.resampling_steps and i < num_inference_steps//2:
-                t1 = torch.tensor([i+1], device=device)
-                latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
-            else:
-                if i < t_cond: latents.requires_grad_(True)
-                latents = pipe.scheduler.scale_model_input(latents, t)
-                
-                
-                if guide and 3 <= i < t_cond:
-                    noise_pred = diffusion_step2(latents, t, text_embeddings, guidance_scale)
-                    #latents2, noise_pred = diffusion_step(unet, scheduler, controller, latents, text_embeddings, t, guidance_scale)
-                    #latents2 = pipe.scheduler.step(noise_pred, t, latents).prev_sample
-                    #latents2 = controller.step_callback(latents2)
-                    attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
-                    
-                    attention_maps = attention_maps16.to(torch.float) 
-                    s_hat = attention_maps[:,:,mask_index] 
-                    original_latents = torch.load(f'inversion/{i}.pt')
-                    #o_prev = original_latents - latents
-                    
-                    save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
-                    l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-                    #l2 = 10 * lossM(latents2, original_latents * (1-mask) + (mask) * latents2)
-                    print(l1)
-                    #print(l2)
-                    loss = l1 #+ l2
-                    loss.backward()
-                    
-                    grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-                    eta = 0.9
-                    #latents = latents2 - eta * lambd[i]  * grad_x #+ o_prev
-                    # Instead, let's do it ourselves:
-                    prev_t = max(1, t.item() - (1000//num_inference_steps)) # t-1
-                    alpha_t = pipe.scheduler.alphas_cumprod[t.item()]
-                    alpha_t_prev = pipe.scheduler.alphas_cumprod[prev_t]
-
-                    predicted_x0 = p_t(latents, alpha_t, noise_pred)
-                    noise_pred = noise_pred - eta *  (1-alpha_t).sqrt() * grad_x
-                    
-                    direction_pointing_to_xt = d_t(alpha_t_prev, noise_pred)
-                    latents = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt
-                    #latents = original_latents * (1-mask) + (mask) * latents2
-                    text_embeddings = text_embeddings.detach()
-                    latents = latents.detach()
-                    
-                else:
-                    with torch.no_grad():
-                        latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
-                    #latents = latents.detach()
-                    #latents = pipe.scheduler.step(noise_pred, t, latents).prev_sample
-        
+        latents = pipe.scheduler.scale_model_input(latents, t)
+        with torch.no_grad():
+            latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
 
     # Post-processing
     latents = latents.detach()
@@ -173,12 +94,10 @@ def sample(prompt, start_step=0, start_latents=None,
 
 
 
+image = Image.open(f'examples/cat_on_table.jpg').convert('RGB').resize((512,512))
+prompt = "a cat sitting on a table"
 
-
-image = Image.open(f'examples/img1.png').convert('RGB').resize((512,512))
-prompt = "a cat sitting next to a mirror"
-
-context = compute_embeddings(tokenizer, text_encoder, device, 1, prompt)
+context = compute_embeddings(tokenizer, text_encoder, device, 1, prompt, sd=True)
 guidance_scale = 3.5
 num_inference_steps = 50
 scheduler.set_timesteps(num_inference_steps)
@@ -191,49 +110,26 @@ mask_index = 2
 h = None
 new_attn = None
 ht = None
-if args.guide:
-    h = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
-    new_attn = get_multi_level_attention_from_average(h, device)
-    hr = cv2.resize(h, (args.res_size, args.res_size))
-    cv2.imwrite(args.out_path + "hr.png", hr)
-    ht = torch.tensor(cv2.resize(h, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-    ht.requires_grad = False
-
 
 controller = AttentionStore()
 register_attention_control(unet, controller, None)
-for param in unet.parameters():
-    param.requires_grad = False
-lossF = torch.nn.BCELoss()
-
 
 mask = torch.ones((1, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-if args.guide:
-    original_mask = cv2.imread(f'original_mask.png', cv2.IMREAD_GRAYSCALE)
-    original_mask = torch.tensor(cv2.resize(original_mask, (args.res_size, args.res_size)), dtype=torch.float, device=device) / 255 
-    heatmap = cv2.resize(ht.cpu().numpy() + original_mask.cpu().numpy(), (64,64))
-    #heatmap = heatmap / heatmap.max()
-    mask = torch.tensor(heatmap,device=device, dtype=MODEL_TYPE)
-    save_tensor_as_image(mask,"mask.png")
-
 
 inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
-                            controller=controller, ht=ht,lossF=lossF,mask_index=2,
-                            prompt=prompt,guide=True, mask = mask)
-
-if not args.guide:
-    attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
-    save_tensor_as_image(attention_maps16[:, :, mask_index],"original_mask.png")
-
-start_step = 15
-#rec_latents = latent2image(inverted_latents[-1].unsqueeze(0)
-lossM = torch.nn.MSELoss()
+                             ht=ht,mask_index=2,
+                            prompt=prompt, mask = mask , controller=controller)
 
 
+attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+words = prompt.split()
+for mask_index in range(len(words)):
+    save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'mask_{words[mask_index]}.png')
+
+
+start_step = 5
 
 with torch.no_grad():
-    rec_image = sample(prompt,start_latents=inverted_latents[-(start_step+1)][None][0], \
-        start_step=start_step, num_inference_steps=50,controller=controller, ht=ht,
-        lossF=lossF,mask_index=2,guide=False)
-#print(rec_image.shape)
+    rec_image = sample(start_latents=inverted_latents[-(start_step+1)][None][0], \
+        start_step=start_step, num_inference_steps=50)
 cv2.imwrite("a.png",rec_image)

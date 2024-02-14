@@ -254,6 +254,7 @@ def show_cross_attention(tokenizer, prompts, attention_store: AttentionStore, re
 
 
 def lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding):
+    
     model_pred = unet(
                     latents,
                     t,
@@ -395,30 +396,7 @@ def register_attention_control(model, controller, attns = None):
 
     controller.num_att_layers = cross_att_count
 
-def bw_hook(module, grad_input, grad_output):
-    print('grad_output:', grad_output)
 
-def fw_hook(module, input, output):
-    W = module.to_out[0].weight
-    b = module.to_out[0].bias
-    print(input[0].shape)
-    print(module)
-    print(output.shape)
-    #reconstructed_input = torch.matmul((output - b).to(torch.float), torch.inverse(W.T.to(torch.float)))
-    #print(reconstructed_input.shape)
-    #print(output.shape)
-
-
-def register_hook(net_, count, place_in_unet, module_name=None, saved_modules=[]):
-    if module_name in ["attn1", "attn2"]:
-
-        net_.register_forward_hook(fw_hook)
-        return count + 1
-    elif hasattr(net_, 'children'):
-
-        for k, net__ in net_.named_children():
-            count = register_hook(net__, count, place_in_unet, module_name=k)
-    return count
 
 def get_attn_layers(model):
     queue = list(model.named_children())
@@ -452,87 +430,35 @@ def p_t(x_t, alpha_t, eps_t):
 def d_t(alpha_t_prev, eps_t):
     return (1-alpha_t_prev).sqrt()*eps_t
 
-
-
-
-def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, guide = False, mask_index = 0, prompt = "", controller = None, lossF = None, ht = None, mask=None):
+def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, mask_index = 0, prompt = "", controller = None, ht = None, mask=None):
     latents.requires_grad_(True)
-    z_0 = latents.clone()
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
-    lambd = torch.linspace(1, 0, num_inference_steps//2)
+    
     for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
-        if guide:
-            controller.reset()
-        # We'll skip the final iteration
-        if i >= num_inference_steps - 1: continue
-        if i > num_inference_steps // 2: latents.requires_grad_(True)
         t = timesteps[i]
 
         latents = scheduler.scale_model_input(latents, t)
         
-        #TODO check definition of pointing to x_t
-        #TODO try cosine scheduling
-        # Inverted update step (re-arranging the update step to get x(t) (new latents) as a function of x(t-1) (current latents)
-        #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
-        
-        if guide and  num_inference_steps // 2 < i < num_inference_steps:
-            noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+        with torch.no_grad():
+            #noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
             noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
-            
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+            noise_pred = noise_prediction_text
+            #noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
             
             current_t = max(0, t.item() - (1000//num_inference_steps)) #t
             next_t = t # t+1
             alpha_t = scheduler.alphas_cumprod[current_t]
             alpha_t_next = scheduler.alphas_cumprod[next_t]
-
-
-            attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
-            s_hat = attention_maps16[:,:,mask_index]
-            save_tensor_as_image(s_hat,"loss_attn.png", plot = True)
-            s_hat = s_hat.to(dtype=torch.float)
-            l1 = lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-            
-            loss = l1 #sum(losses)
-            loss.backward()
-            print(loss)
-            grad_x = latents.grad / torch.abs(latents.grad).max()#/ torch.linalg.norm(latents.grad)#torch.abs(latents.grad).max()
-            
-            eta = 0.3
-            hatz_0 = p_t(latents, alpha_t, noise_pred)* alpha_t_next.sqrt()
-            hatz_0 = hatz_0 - eta * (1 - mask) * (hatz_0 - z_0)
-            noise_pred = noise_pred - eta * (1-alpha_t).sqrt() * grad_x
-            
-            direction =  d_t(alpha_t_next, noise_pred)
-            latents = hatz_0 + direction
-            #latents2 = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
-            #latents = latents2 - eta * lambd[i]  * grad_x
-                
-               
-            context = context.detach()
-            latents = latents.detach()
-            latents.requires_grad_(True)
-        else:
-            with torch.no_grad():
-                #noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
-                noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
-                noise_pred = noise_prediction_text
-                #noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
-                
-                current_t = max(0, t.item() - (1000//num_inference_steps)) #t
-                next_t = t # t+1
-                alpha_t = scheduler.alphas_cumprod[current_t]
-                alpha_t_next = scheduler.alphas_cumprod[next_t]
-                latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
-            
+            latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
+        
         torch.save(latents,f'inversion/{num_inference_steps - i}.pt')
         intermediate_latents.append(latents.detach())
         
             
     return intermediate_latents
 
-def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt):
+def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt, sd=False):
     text_input = tokenizer(
             prompt,
             padding="max_length",
@@ -542,33 +468,16 @@ def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt):
         )
 
     text_emb = text_encoder(text_input.input_ids.to(device))[0]
-
     max_length = text_input.input_ids.shape[-1]
-    uncond_input = tokenizer(
-            [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
-    )
-    uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
-    context = torch.cat([uncond_embeddings, text_emb])
+    context = text_emb
+    if sd:
+        uncond_input = tokenizer(
+                [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
+        )
+        uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
+        context = torch.cat([uncond_embeddings, context])
     return context
 
-#TODO test projection
-
-def project_attention(attn, v, layer):
-    inner_dim = v.shape[-1]
-    head_dim = inner_dim // layer.heads
-    hidden_states = attn @ v
-    ndim = hidden_states.ndim
-    if ndim == 4:
-        batch_size, channel, height, width = hidden_states.shape
-        hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
-    hidden_states = hidden_states.transpose(1, 2).reshape(1, -1, attn.heads * head_dim)
-    hidden_states = hidden_states.to(v.dtype)
-    # linear proj
-    hidden_states = layer.to_out[0](hidden_states)
-    
-    if ndim == 4:
-        hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
-    
 
 def get_guidance_scale_embedding(w, embedding_dim=512, dtype=torch.float16):
         """
@@ -590,7 +499,8 @@ def get_guidance_scale_embedding(w, embedding_dim=512, dtype=torch.float16):
 
         half_dim = embedding_dim // 2
         emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=dtype) * -emb)
+        emb = emb.to(device=w.device)
+        emb = torch.exp(torch.arange(half_dim, dtype=dtype, device=w.device) * -emb)
         emb = w.to(dtype)[:, None] * emb[None, :]
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
         if embedding_dim % 2 == 1:  # zero pad
