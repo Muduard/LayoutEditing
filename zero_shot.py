@@ -55,9 +55,12 @@ vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_
 tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+if args.diffusion_type == "LCM":
+    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+else:
+    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
-scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-unet.set_attn_processor(AttnProcessor2_0())
+#unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = 5
@@ -76,8 +79,10 @@ if args.guide:
     ht.requires_grad = False
 
 prompts = ["Portrait of a man with a futuristic city in the background"]
-scheduler.set_timesteps(timesteps, original_inference_steps=50)
-
+if args.diffusion_type == "LCM":
+    scheduler.set_timesteps(timesteps, original_inference_steps=50)
+else:
+    scheduler.set_timesteps(timesteps)
 batch_size = 1
 torch.manual_seed(args.seed)
 if not sl:
@@ -153,7 +158,11 @@ for t in tqdm(scheduler.timesteps):
         with torch.no_grad():
             if not args.guide:
                 torch.save(latents, f'{path_original}{step}.pt')
-            latents, denoised = lcm_diffusion_step(unet,scheduler, None, latents, context, t, w_embedding)
+            if args.diffusion_type == "LCM":
+                latents2, denoised = lcm_diffusion_step(unet, scheduler, None, latents, context, t, w_embedding)
+            else:
+                latents2, denoised = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
+            
     latents = latents.to(dtype=MODEL_TYPE)
     step += 1
 
