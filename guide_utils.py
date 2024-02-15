@@ -62,7 +62,7 @@ class Guide():
                     
                     v = attn_module.to_v(self.context)
                     v = self.reshape_heads_to_batch_dim(attn_module, v)
-                    obj_attn = torch.ones((attn_module.heads, self.resolution ** 2, 77), device=self.mask.device, dtype=self.mask.dtype)
+                    obj_attn = torch.zeros((attn_module.heads, self.resolution ** 2, 77), device=self.mask.device, dtype=self.mask.dtype)
                     obj_attn[:, :, self.mask_index] = torch.stack([self.mask.reshape(-1)] * attn_module.heads)
                     out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
                     out = self.reshape_batch_dim_to_heads(attn_module, out)

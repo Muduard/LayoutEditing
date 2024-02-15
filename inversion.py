@@ -43,6 +43,7 @@ MODEL_TYPE = torch.float16
 args = parser.parse_args()
 
 os.makedirs("generated/",exist_ok = True)
+os.makedirs("inversion/",exist_ok = True)
 device = "cpu"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
@@ -126,7 +127,7 @@ words = prompt.split()
 for mask_index in range(len(words)):
     save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'mask_{words[mask_index]}.png')
 
-
+torch.save(inverted_latents[-1],f'starting_latent.pt')
 start_step = 5
 
 with torch.no_grad():

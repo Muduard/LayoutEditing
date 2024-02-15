@@ -11,9 +11,9 @@ import numpy as np
 import torch.nn.functional as F
 from diffusers.models.attention_processor import AttnProcessor2_0
 from guide_utils import Guide
-
+from PIL import Image
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-repo_id = "SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
+repo_id = "runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="mask_cat.png",
@@ -36,11 +36,10 @@ parser.add_argument('--prompt', default="A cat with a city in the background",
 parser.add_argument('--mask_index', nargs='+', help='List of token indices to move with a mask')
 parser.add_argument("--mask_path", type=str, help="Path of masks as image files with the name of the corresponding token")
 parser.add_argument("--resampling_steps", type=int, default=0, help="Resample noise for better coherence")
-parser.add_argument("--seed", type=int, default=82)
+parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--diffusion_type", type=str, default="LCM")
-
 MODEL_TYPE = torch.float16
-
+sl = False
 
 args = parser.parse_args()
 
@@ -58,10 +57,10 @@ text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", 
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
 scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-#unet.set_attn_processor(AttnProcessor2_0())
+unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
-mask_index = 2
+mask_index = 5
 timesteps = 30
 h = None
 new_attn = None
@@ -76,13 +75,15 @@ if args.guide:
     x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
     ht.requires_grad = False
 
-prompts = ["A cat on the table"]
+prompts = ["Portrait of a man with a futuristic city in the background"]
 scheduler.set_timesteps(timesteps, original_inference_steps=50)
 
 batch_size = 1
 torch.manual_seed(args.seed)
-latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-
+if not sl:
+    latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
+else:
+    latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
 context = compute_embeddings(tokenizer, text_encoder, device, batch_size, prompts, sd=False)
 
 guidance_scale = 8
@@ -139,13 +140,13 @@ for t in tqdm(scheduler.timesteps):
         #l3 = 0.05 * (x_k - latents2).max()
         l3 = 0.15 * lambd[step] * torch.norm(latents2 - x_k)
         #l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
-        obj_attentions = 
+        
         l1 = lossM(guide.outputs, guide.obj_attentions)
         loss = l1
         loss.backward()
         print(loss)
         grad_x = latents.grad 
-        eta = 0.8
+        eta = 0.4
         latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
         guide.reset_step()
     else:
@@ -159,6 +160,7 @@ for t in tqdm(scheduler.timesteps):
 
 torch.save(latents, f'{path_original}{step}.pt')
 image = latent2image(vae, denoised.detach())
-plt.imshow(image)
-plt.savefig(args.out_path + "image.png")
+image = Image.fromarray(image)
+image.save(args.out_path + "image.png")
+
 #show_cross_attention(tokenizer, prompts, controller, res=args.res_size, from_where=["up","down"], out_path=args.out_path + "attns.png")

@@ -452,6 +452,7 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             alpha_t_next = scheduler.alphas_cumprod[next_t]
             latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
         
+        
         torch.save(latents,f'inversion/{num_inference_steps - i}.pt')
         intermediate_latents.append(latents.detach())
         
