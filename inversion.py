@@ -49,7 +49,7 @@ if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
 scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE)
-pipe = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4", scheduler=scheduler, torch_dtype=MODEL_TYPE)
+pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", scheduler=scheduler, torch_dtype=MODEL_TYPE)
 pipe = pipe.to(device)
 vae = pipe.vae
 tokenizer = pipe.tokenizer
@@ -80,7 +80,7 @@ def sample(start_step=0, start_latents=None,
 
     for i in tqdm(range(start_step, num_inference_steps)):
         t = pipe.scheduler.timesteps[i]
-        latents = pipe.scheduler.scale_model_input(latents, t)
+        #latents = pipe.scheduler.scale_model_input(latents, t)
         with torch.no_grad():
             latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
 
@@ -95,11 +95,11 @@ def sample(start_step=0, start_latents=None,
 
 
 
-image = Image.open(f'examples/cat_on_table.jpg').convert('RGB').resize((512,512))
-prompt = "a cat sitting on a table"
+image = Image.open(f'test/qualitative_comp/p5.png').convert('RGB').resize((512,512))
+prompt = "A dog wearing a hat in a room"
 
 context = compute_embeddings(tokenizer, text_encoder, device, 1, prompt, sd=True)
-guidance_scale = 3.5
+guidance_scale = 8
 num_inference_steps = 50
 scheduler.set_timesteps(num_inference_steps)
 image = to_tensor(image)
@@ -125,7 +125,7 @@ inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50,
 attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
 words = prompt.split()
 for mask_index in range(len(words)):
-    save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'mask_{words[mask_index]}.png')
+    save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'masks/mask_{words[mask_index-1]}.png')
 
 torch.save(inverted_latents[-1],f'starting_latent.pt')
 start_step = 5
@@ -133,4 +133,5 @@ start_step = 5
 with torch.no_grad():
     rec_image = sample(start_latents=inverted_latents[-(start_step+1)][None][0], \
         start_step=start_step, num_inference_steps=50)
-cv2.imwrite("a.png",rec_image)
+image = Image.fromarray(rec_image)
+image.save(f"a.png")

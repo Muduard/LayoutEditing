@@ -13,7 +13,7 @@ from diffusers.models.attention_processor import AttnProcessor2_0
 from guide_utils import Guide
 from PIL import Image
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-repo_id = "runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
+ #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="mask_cat.png",
@@ -51,6 +51,11 @@ device = "cpu"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
+if args.diffusion_type == "LCM":
+    repo_id = "SimianLuo/LCM_Dreamshaper_v7"
+else:
+    repo_id = "runwayml/stable-diffusion-v1-5"
+
 vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
 tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
@@ -63,8 +68,8 @@ else:
 #unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
-mask_index = 5
-timesteps = 30
+mask_index = 6
+timesteps = 50
 h = None
 new_attn = None
 
@@ -78,7 +83,7 @@ if args.guide:
     x_0 = torch.load(f'{path_original}{timesteps}.pt',map_location = device)
     ht.requires_grad = False
 
-prompts = ["Portrait of a man with a futuristic city in the background"]
+prompts = [args.prompt]
 if args.diffusion_type == "LCM":
     scheduler.set_timesteps(timesteps, original_inference_steps=50)
 else:
@@ -89,7 +94,8 @@ if not sl:
     latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
 else:
     latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
-context = compute_embeddings(tokenizer, text_encoder, device, batch_size, prompts, sd=False)
+context = compute_embeddings(tokenizer, text_encoder, device, 
+                             batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
 
 guidance_scale = 8
 
@@ -141,34 +147,34 @@ for t in tqdm(scheduler.timesteps):
         
         guide.guide()
         #l1 = 1 * lossF(s_hat,ht) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), ht)
-        l2 = 0.1 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
+        l2 = 0.2 * lossM(latents2, x_k * (1-mask) + (mask) * latents2)
         #l3 = 0.05 * (x_k - latents2).max()
         l3 = 0.15 * lambd[step] * torch.norm(latents2 - x_k)
         #l4 = 1 - 2 * (s_hat * ht).sum() / (s_hat.sum() + ht.sum())
         
         l1 = lossM(guide.outputs, guide.obj_attentions)
-        loss = l1
+        loss = l1 + l2
         loss.backward()
         print(loss)
-        grad_x = latents.grad 
-        eta = 0.4
-        latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
+        grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
+        eta = 0.8
+        latents = latents2 - eta * lambd[step]  * grad_x
         guide.reset_step()
     else:
         with torch.no_grad():
             if not args.guide:
                 torch.save(latents, f'{path_original}{step}.pt')
             if args.diffusion_type == "LCM":
-                latents2, denoised = lcm_diffusion_step(unet, scheduler, None, latents, context, t, w_embedding)
+                latents, denoised = lcm_diffusion_step(unet, scheduler, None, latents, context, t, w_embedding)
             else:
-                latents2, denoised = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
+                latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
             
     latents = latents.to(dtype=MODEL_TYPE)
     step += 1
 
 
 torch.save(latents, f'{path_original}{step}.pt')
-image = latent2image(vae, denoised.detach())
+image = latent2image(vae, latents.detach())
 image = Image.fromarray(image)
 image.save(args.out_path + "image.png")
 
