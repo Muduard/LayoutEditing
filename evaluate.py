@@ -30,7 +30,7 @@ def compute_fids(path1, path2, n_datapoints, n):
         for f in sample2:
             shutil.copyfile(path2 + f, test_dir2 + f)
         print(path1)
-        fids.append(fid_score.calculate_fid_given_paths((test_dir1,test_dir2),16,"cuda:1",2048,16))
+        fids.append(fid_score.calculate_fid_given_paths((test_dir1,test_dir2),16,"cuda:0",2048,16))
         print(fids[-1])
     return fids
 
@@ -46,11 +46,11 @@ def fid_over_time_plot(path1, path2, n_datapoints, n_dataset):
     plt.savefig("fid_results.png")
 
 def compute_original_statistics(path, stats_name):
-    fid_score.save_fid_stats((path, stats_name), 16, "cuda:1",2048,16)
+    fid_score.save_fid_stats((path, stats_name), 16, "cuda:0",2048,16)
 
 n_datapoints = 1
 path1 = "datasets/images/val2017/"#"datasets/annotations/cap_val2017.npz"#"datasets/images/val2017/"
-path2 = "generated_lcm/"
+path2 = "generated3/"
 
 #compute_original_statistics(path1, "datasets/annotations/cap_val2017.npz")
-fid_over_time_plot(path1,path2,n_datapoints,10000)
+fid_over_time_plot(path1,path2,n_datapoints,3800)
