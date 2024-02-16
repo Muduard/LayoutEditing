@@ -12,7 +12,7 @@ import numpy as np
 import torch.nn.functional as F
 from torchvision.transforms.functional import to_pil_image,to_tensor
 from PIL import Image
-repo_id =  "CompVis/stable-diffusion-v1-4"#"CompVis/stable-diffusion-v1-4"#
+repo_id = "runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="cat3.png",
@@ -36,6 +36,8 @@ parser.add_argument('--mask_index', nargs='+', help='List of token indices to mo
 parser.add_argument("--mask_path", type=str, help="Path of masks as image files with the name of the corresponding token")
 parser.add_argument("--resampling_steps", type=int, default=0, help="Resample noise for better coherence")
 parser.add_argument("--seed", type=int, default=24)
+parser.add_argument("--i", type=str, default="")
+
 
 MODEL_TYPE = torch.float16
 
@@ -49,7 +51,7 @@ if args.cuda > -1:
      device = f'cuda:{args.cuda}'
 
 scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE)
-pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", scheduler=scheduler, torch_dtype=MODEL_TYPE)
+pipe = StableDiffusionPipeline.from_pretrained(repo_id, scheduler=scheduler, torch_dtype=MODEL_TYPE)
 pipe = pipe.to(device)
 vae = pipe.vae
 tokenizer = pipe.tokenizer
@@ -95,8 +97,8 @@ def sample(start_step=0, start_latents=None,
 
 
 
-image = Image.open(f'test/qualitative_comp/p5.png').convert('RGB').resize((512,512))
-prompt = "A dog wearing a hat in a room"
+image = Image.open(args.i).convert('RGB').resize((512,512))
+prompt = args.prompt
 
 context = compute_embeddings(tokenizer, text_encoder, device, 1, prompt, sd=True)
 guidance_scale = 8
