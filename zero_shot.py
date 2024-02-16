@@ -60,7 +60,7 @@ text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", 
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
 scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-unet.set_attn_processor(AttnProcessor2_0())
+#unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = int(args.mask_index[0])

@@ -332,6 +332,7 @@ def register_attention_control(model, controller, attns = None):
             
             k = self.to_k(context)
             v = self.to_v(context)
+            
             q = reshape_heads_to_batch_dim(self, q)
             k = reshape_heads_to_batch_dim(self, k)
             v = reshape_heads_to_batch_dim(self, v)

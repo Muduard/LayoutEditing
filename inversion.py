@@ -95,8 +95,6 @@ def sample(start_step=0, start_latents=None,
     return images
 
 
-
-
 image = Image.open(args.i).convert('RGB').resize((512,512))
 prompt = args.prompt
 
@@ -124,7 +122,7 @@ inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50,
                             prompt=prompt, mask = mask , controller=controller)
 
 
-attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
 words = prompt.split()
 for mask_index in range(len(words)):
     save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'masks/mask_{words[mask_index-1]}.png')

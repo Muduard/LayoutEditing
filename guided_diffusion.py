@@ -38,7 +38,7 @@ parser.add_argument("--resampling_steps", type=int, default=0, help="Resample no
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--diffusion_type", type=str, default="LCM")
 MODEL_TYPE = torch.float16
-sl = True
+sl = False
 
 args = parser.parse_args()
 
@@ -68,6 +68,7 @@ else:
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = int(args.mask_index[0])
+print(mask_index)
 timesteps = 50
 h = None
 new_attn = None
@@ -109,9 +110,7 @@ lambd = torch.linspace(1, 0, timesteps // 2)
 
 lossF = torch.nn.BCELoss()#BCELoss()#MSELoss()
 lossM = torch.nn.MSELoss()
-
 lossKL = torch.nn.KLDivLoss()
-m = torch.nn.Sigmoid()
 
 mask = torch.ones_like(latents)
 if args.guide:
@@ -154,9 +153,9 @@ for t in tqdm(scheduler.timesteps):
         l1 = lossM(guide.outputs, guide.obj_attentions)
         loss = l1 #+ l2
         loss.backward()
-        #print(loss)
+        print(loss)
         grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
-        eta = 1
+        eta = 0.1
         latents = latents2 - eta * lambd[step]  * grad_x
         guide.reset_step()
     else:

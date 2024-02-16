@@ -60,21 +60,27 @@ class Guide():
             if self.step == 0:
                 for attn_module in self.modules:
                     if len(self.context) == 2:
-                        v = attn_module.to_v(self.context[1].unsqueeze(0))
+                        v = attn_module.to_v(self.context)
                     else:
                         v = attn_module.to_v(self.context)
                     
                     v = self.reshape_heads_to_batch_dim(attn_module, v)
+                    
+                    heads = attn_module.heads
+                    if len(self.context==2):
+                         heads = heads*2
                     obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.mask.device, dtype=self.mask.dtype) / 10
                     obj_attn[:, :, self.mask_index] = torch.stack([self.mask.reshape(-1)] * attn_module.heads)
                     
                     out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
+                    
                     out = self.reshape_batch_dim_to_heads(attn_module, out)
                     out = attn_module.to_out[0](out)
                     self.obj_attentions.append(out)
                 self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.mask.dtype, device=self.mask.device)
-            
+        
         self.outputs = torch.cat(self.outputs).to(dtype=self.mask.dtype, device=self.mask.device)
+        print(self.outputs.shape)
 
     def reset_step(self):
         self.outputs = []
