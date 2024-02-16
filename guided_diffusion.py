@@ -38,7 +38,7 @@ parser.add_argument("--resampling_steps", type=int, default=0, help="Resample no
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--diffusion_type", type=str, default="LCM")
 MODEL_TYPE = torch.float16
-sl = False
+sl = True
 
 args = parser.parse_args()
 
@@ -156,7 +156,7 @@ for t in tqdm(scheduler.timesteps):
         loss.backward()
         #print(loss)
         grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
-        eta = 1.4
+        eta = 1
         latents = latents2 - eta * lambd[step]  * grad_x
         guide.reset_step()
     else:
