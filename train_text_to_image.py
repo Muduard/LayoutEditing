@@ -59,7 +59,7 @@ if is_wandb_available():
 logger = get_logger(__name__, log_level="INFO")
 
 DATASET_NAME_MAPPING = {
-    "datasets/train2017": ("image", "text"),
+    "datasets/images/train2017": ("image", "text"),
 }
 
 
@@ -688,7 +688,7 @@ def main():
             data_files["train"] = os.path.join(args.train_data_dir, "**")
         
         dataset = load_dataset(
-            "imagefolder",
+            "datasets/images/train2017/",
             #data_dir=args.train_data_dir,
             data_files=data_files,
             cache_dir=args.cache_dir,
@@ -700,10 +700,10 @@ def main():
     # Preprocessing the datasets.
     # We need to tokenize inputs and targets.
     column_names = dataset["train"].column_names
-
+    
     # 6. Get the column names for input/target.
     dataset_columns = DATASET_NAME_MAPPING.get(args.dataset_name, None)
-    print(dataset_columns)
+    
     if args.image_column is None:
         image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
     else:
@@ -720,7 +720,8 @@ def main():
             raise ValueError(
                 f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
             )
-
+    print(caption_column)
+    print(image_column)
     # Preprocessing the datasets.
     # We need to tokenize input captions and transform the images.
     def tokenize_captions(examples, is_train=True):
