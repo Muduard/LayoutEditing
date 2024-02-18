@@ -27,6 +27,7 @@ path2 = "./eval_lcm/"
 
 score = fid.compute_fid(path1, path2, dataset_res=512)
 print(score)
+'''
 # Load and preprocess real images
 real_images = []
 for filename in tqdm(os.listdir(path1)[:]):
@@ -49,6 +50,4 @@ generated_images = torch.cat(generated_images, dim=0)
 #metric.update(generated_images, real=False)
 #fig_, ax_ = metric.plot()
 #fig_.savefig("fid.png")
-# Calculate FID score
-#fid_score = calculate_fid_score(real_images, generated_images)
-#print("FID Score:", fid_score)
+'''
