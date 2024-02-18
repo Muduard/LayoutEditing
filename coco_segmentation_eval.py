@@ -100,43 +100,40 @@ def show_box(box, ax):
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))    
 
-id = 53505
-image = cv2.imread(f'eval_zs/{id}.png')
-image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-plt.figure(figsize=(10,10))
-plt.imshow(image)
-plt.axis('on')
-plt.savefig("initial_image.png")
-sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth")
-#sam.to(device="cuda:5")
-
-
-
-ann = coco.getAnnIds(id)
-s = coco.loadAnns(ann)[0]
-real_mask = coco.annToRLE(s)
-
+sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to("cuda:1")
 predictor = SamPredictor(sam)
-predictor.set_image(image)
-centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
-#box = np.array([[s['bbox'][0], s['bbox'][1], s['bbox'][0] + s['bbox'][2], s['bbox'][1] + s['bbox'][3]]])
-input_point = np.array([centroid])
-input_label = np.array([1])
+predictor = predictor
+data_path = "eval_cos_0.3/"
+dataset = os.listdir(data_path)
 
-masks, scores, logits = predictor.predict(
-    point_coords=input_point,
-    point_labels=input_label,
-    multimask_output=True,
-)
+ious = []
+bar = tqdm(dataset)
+for f in bar:
+    id = int(f[:-4])
+    image = cv2.imread(f'{data_path}{id}.png')
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    ann = coco.getAnnIds(id)
+    s = coco.loadAnns(ann)[0]
+    real_mask = coco.annToRLE(s)
+    predictor.set_image(image)
+    centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
+    input_point = np.array([centroid])
+    input_label = np.array([1])
+    masks, scores, logits = predictor.predict(
+        point_coords=input_point,
+        point_labels=input_label,
+        multimask_output=True,
+    )
 
-max_iou = 0
+    max_iou = 0
 
-for m in masks:
-    pred_mask = np.asfortranarray(m)
-    pred_mask = mask_utils.encode(pred_mask)
-    iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
-    if iou > max_iou:
-        max_iou = iou
+    for m in masks:
+        pred_mask = np.asfortranarray(m)
+        pred_mask = mask_utils.encode(pred_mask)
+        iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
+        if iou > max_iou:
+            max_iou = iou
+    ious.append(max_iou)
+    bar.set_postfix_str(f'iou: {sum(ious) / len(ious)}')
 
-print(f'iou: {max_iou}')
+print(sum(ious) / len(ious))
