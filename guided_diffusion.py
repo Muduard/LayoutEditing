@@ -7,7 +7,7 @@ from ptp_utils import diffusion_step,latent2image, lcm_diffusion_step, get_guida
 from guide_utils import Guide
 from PIL import Image
 
-def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, mask, mask_index, resolution, out_path):
+def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, mask, mask_index, resolution, out_path, loss_type="mse", eta=0.15):
     
     lossM = torch.nn.MSELoss()
     
@@ -39,25 +39,34 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             guide.guide()
             
             if diffusion_type == "SD":
-                l1 = lossM(guide.outputs[guide.count:], guide.obj_attentions[1])
-            else:
-                l1 = 0
-                for l in range(guide.outputs.shape[0]):
-                    a = guide.outputs[l].flatten()
-                    b = guide.obj_attentions[l].flatten()
+                x = guide.outputs[guide.count:]
+                y = guide.obj_attentions[1]
+            else: 
+                x = guide.outputs
+                y = guide.obj_attentions
+            l1 = 0
+            if loss_type == "cosine":
+                for l in range(x.shape[0]):
+                    a = x[l].flatten()
+                    b = y[l].flatten()
                     l1 += 1 - torch.dot(a, b) / (a.norm() * b.norm())
+            elif loss_type=="mse":
+                l1 = lossM(x, y)
+            elif loss_type== "trace":
+                for l in range(x.shape[0]):
+                    l1 += torch.trace((x[l] / x[l].max()) 
+                                        @ (y[l].T / y[l].max()))
                     
                 #l1 = lossKL(torch.log(guide.outputs + eps), guide.obj_attentions)
             loss = l1 #+ l2
             loss.backward()
             
-            print(loss)
+            
             grad_x = latents.grad #/ torch.max(torch.abs(latents.grad)) 
-            eta = 0.2 #0.2 SD #0.4 setting lcm
+             #0.2 SD #0.4 setting lcm
             latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
             del latents2
-            del a
-            del b
+            
             guide.reset_step()
         else:
             with torch.no_grad():

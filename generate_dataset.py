@@ -10,7 +10,7 @@ from torchvision.transforms.functional import to_pil_image
 from diffusers.models.attention_processor import AttnProcessor2_0
 from accelerate import PartialState 
 from PIL import Image
-repo_id =  "runwayml/stable-diffusion-v1-5"#"SimianLuo/LCM_Dreamshaper_v7"#"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#
+repo_id =  "SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5"#"SimianLuo/LCM_Dreamshaper_v7"#"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#
 #repo_id = "trained_coco/checkpoint-4500"
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--mask', default="new_mask.png",
@@ -39,13 +39,9 @@ MODEL_TYPE = torch.float16
 
 
 args = parser.parse_args()
-unet = UNet2DConditionModel.from_pretrained("trained_coco/checkpoint-4500/unet/")
-pipe = StableDiffusionPipeline.from_pretrained(
-            repo_id,
-            unet=unet
-        )
-
-os.makedirs("generated3/",exist_ok = True)
+pipe = StableDiffusionPipeline.from_pretrained(repo_id)
+out_dir = "eval_lcm/"
+os.makedirs(out_dir,exist_ok = True)
 device = "cuda"
 if args.cuda > -1:
      device = f'cuda:{args.cuda}'
@@ -84,16 +80,16 @@ for i in data['annotations']:
 # Closing file
 f.close()
 
-batch_size = 64
+batch_size = 16
 
 
-guidance_scale = 32
+guidance_scale = 8
 
 
-n_images = len(os.listdir("./generated3"))
+n_images = len(os.listdir(out_dir))
 print(f"starting from caption {n_images}")
 
-cap1 = np.choice(np.array(captions),5000)
+cap1 = np.random.choice(captions,2000)
 cap2 = []
 for i in range(0,len(cap1)-batch_size, batch_size):
      cap2.append(cap1[i:i+batch_size])
@@ -132,19 +128,18 @@ def get_guidance_scale_embedding(w, embedding_dim=512, dtype=torch.float16):
 with torch.no_grad():
     
     i = 0
-    #w = torch.tensor(guidance_scale - 1).repeat(1)
-    #w_embedding = pipe.get_guidance_scale_embedding(w, embedding_dim=pipe.unet.config.time_cond_proj_dim).to(
-    #    device=device, dtype=latents_original.dtype
-    #)
+    w = torch.tensor(guidance_scale - 1).repeat(1)
+    w_embedding = pipe.get_guidance_scale_embedding(w, embedding_dim=pipe.unet.config.time_cond_proj_dim).to(
+        device=device, dtype=latents_original.dtype
+    )
     for caption in tqdm(cap2):
         pipe.scheduler.set_timesteps(num_inference_steps)
         latents = torch.clone(latents_original) * pipe.scheduler.init_noise_sigma
+        caption = list(caption)
         images = pipe(caption).images
         for im in images:
-            im.save(f"generated3/{i}.png")
-            
+            im.save(f"{out_dir}{i}.png") 
             i+=1
-        print(i)
         '''context = compute_embeddings(text_encoder=pipe.text_encoder,tokenizer=pipe.tokenizer,
                                      device=device,batch_size=1,sd=True,prompt=caption)
         for t in tqdm(pipe.scheduler.timesteps):

@@ -9,6 +9,7 @@ from diffusers.models.attention_processor import AttnProcessor2_0
 import json
 from guided_diffusion import guide_diffusion
 import pickle
+from tqdm import tqdm
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
  #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
@@ -36,6 +37,8 @@ parser.add_argument("--resampling_steps", type=int, default=0, help="Resample no
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--diffusion_type", type=str, default="LCM")
 parser.add_argument("--from_file", type=str, default=None)
+parser.add_argument("--loss_type", type=str, default="mse")
+parser.add_argument("--eta", type=float, default=0.2)
 MODEL_TYPE = torch.float16
 sl = False
 
@@ -54,25 +57,13 @@ if args.diffusion_type == "LCM":
 else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-if args.diffusion_type == "LCM":
-    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-else:
-    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
-
-for param in unet.parameters():
-        param.requires_grad = False
 
 timesteps = 50
 batch_size = 1
 guidance_scale = 3
 torch.manual_seed(args.seed)
 
-unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 if args.from_file == None:
     mask_index = int(args.mask_index[0])
@@ -90,11 +81,22 @@ if args.from_file == None:
     else:
         latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
     prompts = [args.prompt]
+
+    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+    if args.diffusion_type == "LCM":
+        scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+    else:
+        scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
     if args.diffusion_type == "LCM":
         scheduler.set_timesteps(timesteps, original_inference_steps=50)
     else:
         scheduler.set_timesteps(timesteps)
-    
+    for param in unet.parameters():
+        param.requires_grad = False
     
     context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
@@ -105,15 +107,37 @@ if args.from_file == None:
                 args.diffusion_type, timesteps, args.guide, h, \
                 mask_index, args.res, "./test/lcm_kl.png")
 else:
-    torch.cuda.memory._record_memory_history(enabled=True, device=device)
+    #torch.cuda.memory._record_memory_history(enabled=True, device=device)
     with open(args.from_file, "r") as f:
         data = json.load(f)['image_data']
-        for i in range(len(data)):
+        #losses = ["cosine"]
+        #etas = [0.01, 0.02,0.04,0.06,0.08]
+        #for l in range(len(losses)):
+        #    args.loss_type = losses[l]
+        #    for e in etas:
+        #        args.etas = e
+        #        output_dir = f"./test/{args.loss_type}_{e}/"
+        #        os.makedirs(output_dir,exist_ok=True)
+        #        print(f"Generating with loss: {args.loss_type} and eta: {e}")
+        output_dir = "eval_cos_0.3/"
+        os.makedirs(output_dir, exist_ok=True)
+        for i in tqdm(range(len(data))):
+            
+            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+            if args.diffusion_type == "LCM":
+                scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+            else:
+                scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
             if args.diffusion_type == "LCM":
                 scheduler.set_timesteps(timesteps, original_inference_steps=50)
             else:
                 scheduler.set_timesteps(timesteps)
-
+            for param in unet.parameters():
+                param.requires_grad = False
             mask = cv2.imread(data[i]['mask_path'], cv2.IMREAD_GRAYSCALE)
             context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, [data[i]['caption']], 
@@ -123,7 +147,10 @@ else:
             
             guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
                 args.diffusion_type, timesteps, args.guide, mask, \
-                data[i]['mask_index'], args.res, f"./test/{i}.png")
+                data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
+                loss_type=args.loss_type, eta=args.eta)
+            
             torch.cuda.empty_cache()
+
             # Capture a snapshot of GPU memory allocations
             
