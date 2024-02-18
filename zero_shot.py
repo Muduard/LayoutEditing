@@ -4,7 +4,7 @@ from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, LCMSched
 from transformers import CLIPTextModel, CLIPTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding
+from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_from_average,compute_embeddings,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding
 import cv2
 import argparse
 import numpy as np
@@ -59,12 +59,16 @@ tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
 unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 
-scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+if args.diffusion_type == "LCM":
+    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+else:
+    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
 #unet.set_attn_processor(AttnProcessor2_0())
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
 mask_index = int(args.mask_index[0])
-timesteps = 40
+timesteps = 50
 h = None
 new_attn = None
 
@@ -81,7 +85,10 @@ controller = AttentionStore()
 register_attention_control(unet, controller, None)
 
 prompts = [args.prompt]
-scheduler.set_timesteps(timesteps, original_inference_steps=50)
+if args.diffusion_type == "LCM":
+    scheduler.set_timesteps(timesteps, original_inference_steps=50)
+else:
+    scheduler.set_timesteps(timesteps)
 
 batch_size = 1
 torch.manual_seed(args.seed)
@@ -94,17 +101,9 @@ text_input = tokenizer(
         return_tensors="pt",
     )
 
-text_emb = text_encoder(text_input.input_ids.to(device))[0]
+context = compute_embeddings(tokenizer, text_encoder, device, 
+                             batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
 
-max_length = text_input.input_ids.shape[-1]
-uncond_input = tokenizer(
-        [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt"
-)
-uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
-
-
-#context = torch.cat([uncond_embeddings, text_emb])
-context = text_emb
 guidance_scale = 8
 
 for param in unet.parameters():
@@ -141,12 +140,13 @@ if args.guide:
 theta = torch.linspace(0.7, 1, timesteps//2)
 sigma = torch.linspace(0.1, 0., timesteps//2)
 #mask = torch.ones((64,64), device=noise.device, dtype=MODEL_TYPE)
-
-w = torch.tensor(guidance_scale - 1).repeat(1)
-w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim).to(
-    device=device, dtype=latents.dtype
-)
-for t in tqdm(scheduler.timesteps):    
+if args.diffusion_type == "LCM":
+    w = torch.tensor(guidance_scale - 1).repeat(1).to(device=device, dtype=latents.dtype)
+    w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim).to(
+        device=device, dtype=latents.dtype
+    )
+for t in tqdm(scheduler.timesteps): 
+    t = t.to(device)
     if args.guide:
         x_k = torch.load(f'{path_original}{step}.pt').to(dtype=MODEL_TYPE, device=device)
     
@@ -161,8 +161,10 @@ for t in tqdm(scheduler.timesteps):
                 t1 = torch.tensor([step+1], device=device)
                 latents = scheduler.add_noise(latents,torch.randn_like(latents),t1)
             else:
-                latents2, _ = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
-                #latents2, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
+                if args.diffusion_type == "LCM":
+                    latents2, denoised = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
+                else:
+                    latents2, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
                 
                 attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
                 #attention_maps32, _ = get_cross_attention(prompts, controller, res=32, from_where=["up", "down"])
@@ -204,8 +206,11 @@ for t in tqdm(scheduler.timesteps):
                     attn = torch.where(attn < 0.4, -1, 1)
                     save_tensor_as_image(attn,f"{path_original}{step}.png")
             
-            latents, _ = lcm_diffusion_step(unet,scheduler, controller, latents, context, t, w_embedding)
-            
+            if args.diffusion_type == "LCM":
+                latents, denoised = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
+            else:
+                latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
+    latents = latents.to(dtype=MODEL_TYPE)  
     step += 1
 
 
@@ -215,4 +220,6 @@ image = Image.fromarray(image)
 image.save(args.out_path + "image.png")
 attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
 words = prompts[0].split()
-save_tensor_as_image(attention_maps16[:, :, mask_index],f'masks/mask_{words[mask_index-1]}.png')
+#save_tensor_as_image(attention_maps16[:, :, mask_index],f'masks/mask_{words[mask_index-1]}.png')
+for mask_index in range(len(words)+1):
+    save_tensor_as_image(attention_maps16[:, :, mask_index],f'masks/{mask_index}.png')

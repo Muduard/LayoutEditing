@@ -1,0 +1,26 @@
+{"image_data": [{
+    "caption": "Photorealistic portrait of a man with a futuristic city in the back",
+    "mask_path": "test/qualitative_comp/p1c_m.png",
+    "mask_index": 6
+},
+{
+    "caption": "A brown horse in a farm",
+    "mask_path": "test/qualitative_comp/p2c_m.png",
+    "mask_index": 4
+},
+{
+    "caption": "An elephant in a forest",
+    "mask_path": "test/qualitative_comp/p3c_m.png",
+    "mask_index": 3
+},
+{
+    "caption": "A cat on a table",
+    "mask_path": "test/qualitative_comp/p4c_m.png",
+    "mask_index": 2
+},
+{
+    "caption": "A dog wearing a hat in a room",
+    "mask_path": "test/qualitative_comp/p5c_m.png",
+    "mask_index": 2
+}
+]}

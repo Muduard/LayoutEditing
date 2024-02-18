@@ -264,11 +264,11 @@ def lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embed
                 )[0]
 
                 # compute the previous noisy sample x_t -> x_t-1
-    latents, denoised = scheduler.step(model_pred, t, latents, return_dict=False)
+    latents, _ = scheduler.step(model_pred, t, latents, return_dict=False)
     if controller != None:
-        
         latents = controller.step_callback(latents)
-    return latents, denoised
+    del model_pred
+    return latents, _
 
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale):
     
@@ -279,15 +279,13 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
     noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
     #noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
     #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
-
+    
     noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
     
     latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
     
     if controller != None:
         latents = controller.step_callback(latents)
-        
-        
     
     return latents, noise_pred
 
@@ -460,6 +458,7 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             
     return intermediate_latents
 
+@torch.no_grad()
 def compute_embeddings(tokenizer, text_encoder, device, batch_size, prompt, sd=False):
     text_input = tokenizer(
             prompt,

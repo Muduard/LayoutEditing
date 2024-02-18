@@ -93,8 +93,7 @@ guidance_scale = 32
 n_images = len(os.listdir("./generated3"))
 print(f"starting from caption {n_images}")
 
-n_images_to_generate = len(captions) - n_images
-cap1 = captions[n_images:n_images_to_generate+n_images]
+cap1 = np.choice(np.array(captions),5000)
 cap2 = []
 for i in range(0,len(cap1)-batch_size, batch_size):
      cap2.append(cap1[i:i+batch_size])
