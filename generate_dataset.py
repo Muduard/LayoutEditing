@@ -1,7 +1,7 @@
 import os 
 import torch
 from tqdm import tqdm
-from diffusers import StableDiffusionPipeline,UNet2DConditionModel
+from diffusers import DiffusionPipeline,UNet2DConditionModel
 from ptp_utils import diffusion_step,latent2image,compute_embeddings,lcm_diffusion_step
 import argparse
 import numpy as np
@@ -39,7 +39,7 @@ MODEL_TYPE = torch.float16
 
 
 args = parser.parse_args()
-pipe = StableDiffusionPipeline.from_pretrained(repo_id)
+pipe = DiffusionPipeline.from_pretrained(repo_id)
 out_dir = "eval_lcm/"
 os.makedirs(out_dir,exist_ok = True)
 device = "cuda"
@@ -52,8 +52,8 @@ if args.cuda > -1:
 pipe = pipe.to(device, torch_dtype=MODEL_TYPE)
 num_inference_steps = 50
 
-pipe.unet.set_attn_processor(AttnProcessor2_0())
-torch.compile(pipe.unet, mode="reduce-overhead", fullgraph=True)
+#pipe.unet.set_attn_processor(AttnProcessor2_0())
+#torch.compile(pipe.unet, mode="reduce-overhead", fullgraph=True)
 
 
 import json
@@ -80,7 +80,7 @@ for i in data['annotations']:
 # Closing file
 f.close()
 
-batch_size = 16
+batch_size = 4
 
 
 guidance_scale = 8
@@ -136,7 +136,7 @@ with torch.no_grad():
         pipe.scheduler.set_timesteps(num_inference_steps)
         latents = torch.clone(latents_original) * pipe.scheduler.init_noise_sigma
         caption = list(caption)
-        images = pipe(caption).images
+        images = pipe(caption, num_inference_steps=num_inference_steps).images
         for im in images:
             im.save(f"{out_dir}{i}.png") 
             i+=1
