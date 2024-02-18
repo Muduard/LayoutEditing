@@ -44,7 +44,10 @@ parser.add_argument("--method", type=str, default="new")
 parser.add_argument("--out_dir", type=str, default="test/")
 MODEL_TYPE = torch.float16
 sl = False
+pytorch_version = torch.__version__
 
+# Split the version string into its components
+major, minor, _ = [int(v) for v in pytorch_version.split('.')]
 args = parser.parse_args()
 
 path_original = args.out_path + "original/"
@@ -60,8 +63,11 @@ if args.diffusion_type == "LCM":
 else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
-
-
+if major < 2:
+    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 timesteps = 50
 batch_size = 1
 guidance_scale = 3
@@ -124,12 +130,16 @@ else:
         #        print(f"Generating with loss: {args.loss_type} and eta: {e}")
         output_dir = args.out_dir
         os.makedirs(output_dir, exist_ok=True)
+        files = os.listdir(output_dir)
+        data = data[len(files):]
         for i in tqdm(range(len(data))):
             
-            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+            # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
+            if major > 2 or (major == 2 and minor >= 0):
+                vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+                tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+                text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+                unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
             if args.diffusion_type == "LCM":
                 scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
             else:
@@ -157,7 +167,5 @@ else:
                     args.diffusion_type, timesteps, args.guide, mask, \
                     data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
                     eta=args.eta)
-            torch.cuda.empty_cache()
-
-            # Capture a snapshot of GPU memory allocations
+            
             

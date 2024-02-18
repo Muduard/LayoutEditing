@@ -60,7 +60,7 @@ def create_mask_from_segmentation(id):
 id_list = list(scs.keys())
 
 eval_json = {"image_data": []}
-
+'''
 os.makedirs("masks/", exist_ok=True)
 for n in tqdm(id_list):
     #if n in segmentations and n in widths and n in heights:
@@ -78,9 +78,9 @@ for n in tqdm(id_list):
 with open("eval.json", "w") as f:         
     json.dump(eval_json, f)
 
+'''
 
-
-'''def show_mask(mask, ax, random_color=False):
+def show_mask(mask, ax, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     else:
@@ -100,8 +100,8 @@ def show_box(box, ax):
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))    
 
-
-image = cv2.imread('eval_cos_0.3/776.png')
+id = 53505
+image = cv2.imread(f'eval_zs/{id}.png')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 plt.figure(figsize=(10,10))
@@ -109,23 +109,19 @@ plt.imshow(image)
 plt.axis('on')
 plt.savefig("initial_image.png")
 sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth")
-sam.to(device="cuda:1")
+#sam.to(device="cuda:5")
 
-def compute_centroid(points):
-    length = points.shape[0]
-    sum_x = np.sum(points[:, 0])
-    sum_y = np.sum(points[:, 1])
-    return sum_x/length, sum_y/length
+
+
+ann = coco.getAnnIds(id)
+s = coco.loadAnns(ann)[0]
+real_mask = coco.annToRLE(s)
 
 predictor = SamPredictor(sam)
 predictor.set_image(image)
-
-s = segmentations[776]
-print(s)
-s = compute_centroid(s)
-print(s)
-
-input_point = np.array([s])
+centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
+#box = np.array([[s['bbox'][0], s['bbox'][1], s['bbox'][0] + s['bbox'][2], s['bbox'][1] + s['bbox'][3]]])
+input_point = np.array([centroid])
 input_label = np.array([1])
 
 masks, scores, logits = predictor.predict(
@@ -134,13 +130,13 @@ masks, scores, logits = predictor.predict(
     multimask_output=True,
 )
 
-print(masks.shape)
+max_iou = 0
 
-for i, (mask, score) in enumerate(zip(masks, scores)):
-    plt.figure(figsize=(10,10))
-    plt.imshow(image)
-    show_mask(mask, plt.gca())
-    show_points(input_point, input_label, plt.gca())
-    plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
-    plt.axis('off')
-    plt.savefig(f"fig_{i}.png")'''
+for m in masks:
+    pred_mask = np.asfortranarray(m)
+    pred_mask = mask_utils.encode(pred_mask)
+    iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
+    if iou > max_iou:
+        max_iou = iou
+
+print(f'iou: {max_iou}')

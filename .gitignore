@@ -13,3 +13,4 @@ downloads
 trained_coco
 wandb
 segmentation
+cocoapi

@@ -6,6 +6,10 @@ import numpy as np
 from PIL import Image
 
 def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_scale, diffusion_type, timesteps, guide_flag, mask, mask_index, resolution, out_path, eta=1):
+    
+    if mask_index > 76:
+        return
+
     lossF = torch.nn.BCELoss()
     lambd = torch.linspace(1, 0, timesteps // 2)
     step = 0
@@ -60,11 +64,11 @@ def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_s
                         attn = torch.where(attn < 0.4, -1, 1)
                 
                 if diffusion_type == "LCM":
-                    latents, denoised = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
+                    latents, _ = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
                 else:
                     latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
-            latents = latents.to(dtype=unet.dtype)  
-            step += 1
+        latents = latents.to(dtype=unet.dtype)  
+        step += 1
 
     with torch.no_grad():
         image = latent2image(vae, latents.detach())
