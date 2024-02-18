@@ -12,3 +12,4 @@ downloads
 *.txt
 trained_coco
 wandb
+segmentation

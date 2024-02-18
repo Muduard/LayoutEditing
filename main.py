@@ -9,6 +9,7 @@ from diffusers.models.attention_processor import AttnProcessor2_0
 import json
 from guided_diffusion import guide_diffusion
 import pickle
+from zero_shot import zero_shot
 from tqdm import tqdm
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
  #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
@@ -39,6 +40,8 @@ parser.add_argument("--diffusion_type", type=str, default="LCM")
 parser.add_argument("--from_file", type=str, default=None)
 parser.add_argument("--loss_type", type=str, default="mse")
 parser.add_argument("--eta", type=float, default=0.2)
+parser.add_argument("--method", type=str, default="new")
+parser.add_argument("--out_dir", type=str, default="test/")
 MODEL_TYPE = torch.float16
 sl = False
 
@@ -119,7 +122,7 @@ else:
         #        output_dir = f"./test/{args.loss_type}_{e}/"
         #        os.makedirs(output_dir,exist_ok=True)
         #        print(f"Generating with loss: {args.loss_type} and eta: {e}")
-        output_dir = "eval_cos_0.3/"
+        output_dir = args.out_dir
         os.makedirs(output_dir, exist_ok=True)
         for i in tqdm(range(len(data))):
             
@@ -144,12 +147,16 @@ else:
                                 sd= False if args.diffusion_type =="LCM" else True)
             
             latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-            
-            guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
-                args.diffusion_type, timesteps, args.guide, mask, \
-                data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
-                loss_type=args.loss_type, eta=args.eta)
-            
+            if args.method == "new":
+                guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                    args.diffusion_type, timesteps, args.guide, mask, \
+                    data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
+                    loss_type=args.loss_type, eta=args.eta)
+            else:
+                zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
+                    args.diffusion_type, timesteps, args.guide, mask, \
+                    data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
+                    eta=args.eta)
             torch.cuda.empty_cache()
 
             # Capture a snapshot of GPU memory allocations
