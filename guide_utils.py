@@ -3,11 +3,19 @@ import cv2
 #TODO add automatic mask resolution changing
 class Guide():
     
-    def __init__(self,context, mask, mask_index, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM"):
+    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM"):
         
         self.context = context
-        self.mask = torch.tensor(cv2.resize(mask, (resolution, resolution)), dtype=dtype, device=device) / 255
-        self.mask_index = mask_index
+        acceptable_masks_indexes = []
+        for i in range(len(mask_indexes)):
+             if mask_indexes[i] < 77:
+                  acceptable_masks_indexes.append(i)
+        
+        self.mask_indexes = [mask_indexes[i] for i in acceptable_masks_indexes]
+        self.masks = []
+        for i in acceptable_masks_indexes:
+             self.masks.append(torch.tensor(cv2.resize(masks[i], (resolution, resolution)), 
+                                            dtype=dtype, device=device) / 255)
         self.resolution = resolution
         self.obj_attentions = []
         
@@ -68,9 +76,7 @@ class Guide():
              out_indexes.extend([(i + (len(self.outputs)//2)) for i in self.indexes])
              
         #Select correct modules and outputs
-        
         self.outputs = [self.outputs[i] for i in out_indexes]
-        
         
         #Generate target attention only for the first step because weights don't change
         with torch.no_grad():
@@ -84,8 +90,9 @@ class Guide():
                         v_text = attn_module.to_v(self.context[1].unsqueeze(0))
                         v_text = self.reshape_heads_to_batch_dim(attn_module, v_text)
                         
-                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.mask.device, dtype=self.mask.dtype) / 10
-                        obj_attn[:, :, self.mask_index] = torch.stack([self.mask.reshape(-1)] * attn_module.heads)
+                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 10
+                        for i, mask_index in enumerate(self.mask_indexes):
+                            obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * attn_module.heads)
                         
                         out = torch.einsum("b i j, b j d -> b i d", obj_attn, v_uncond)
                         out = self.reshape_batch_dim_to_heads(attn_module, out)
@@ -101,12 +108,12 @@ class Guide():
                         v = attn_module.to_v(self.context)
                         v = self.reshape_heads_to_batch_dim(attn_module, v)
                         
-                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.mask.device, dtype=self.mask.dtype) / 20
+                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 20
                         if self.base_masks != None:
                             for m in range(len(self.base_masks)):
                                 obj_attn[:, :, m] = torch.stack([self.base_masks[m].reshape(-1)] * attn_module.heads) / 10
-                        
-                        obj_attn[:, :, self.mask_index] = torch.stack([self.mask.reshape(-1)] * attn_module.heads)
+                        for i, mask_index in enumerate(self.mask_indexes):
+                            obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * attn_module.heads)
                         
                         out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
                         
@@ -114,13 +121,13 @@ class Guide():
                         out = attn_module.to_out[0](out)
                         self.obj_attentions.append(out)
                 if len(self.context) == 2:
-                    self.obj_attentions = [torch.cat(o_unconds).to(dtype=self.mask.dtype, device=self.mask.device), 
-                                            torch.cat(o_texts).to(dtype=self.mask.dtype, device=self.mask.device)]
+                    self.obj_attentions = [torch.cat(o_unconds).to(dtype=self.dtype, device=self.device), 
+                                            torch.cat(o_texts).to(dtype=self.dtype, device=self.device)]
                     
                 else:
-                    self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.mask.dtype, device=self.mask.device)
+                    self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
         
-        self.outputs = torch.cat(self.outputs).to(dtype=self.mask.dtype, device=self.mask.device)
+        self.outputs = torch.cat(self.outputs).to(dtype=self.dtype, device=self.device)
         
 
     def reset_step(self):

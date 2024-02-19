@@ -45,10 +45,7 @@ parser.add_argument("--out_dir", type=str, default="test/")
 parser.add_argument("--benchmark", type=str, default="eval-filtered")
 MODEL_TYPE = torch.float16
 sl = False
-pytorch_version = torch.__version__
 
-# Split the version string into its components
-major, minor, _ = [int(v) for v in pytorch_version.split('.')]
 args = parser.parse_args()
 
 path_original = args.out_path + "original/"
@@ -64,17 +61,29 @@ if args.diffusion_type == "LCM":
 else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
-if major < 2:
-    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
 timesteps = 50
 batch_size = 1
 guidance_scale = 3
 torch.manual_seed(args.seed)
 
-#torch.compile(unet, mode="reduce-overhead", fullgraph=True)
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+for param in unet.parameters():
+    param.requires_grad = False
+
+if args.diffusion_type == "LCM":
+    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+else:
+    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
+if args.diffusion_type == "LCM":
+    scheduler.set_timesteps(timesteps, original_inference_steps=50)
+else:
+    scheduler.set_timesteps(timesteps)
+
+torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 if args.from_file == None:
     mask_index = int(args.mask_index[0])
     
@@ -92,6 +101,11 @@ if args.from_file == None:
         latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
     prompts = [args.prompt]
 
+    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+    unet.set_attn_processor(AttnProcessor2_0())
     if args.diffusion_type == "LCM":
         scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
     else:
@@ -132,23 +146,7 @@ else:
         for i in tqdm(range(len(data))):
             
             # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
-            
-            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-            if args.diffusion_type == "LCM":
-                scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-            else:
-                scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-
-            if args.diffusion_type == "LCM":
-                scheduler.set_timesteps(timesteps, original_inference_steps=50)
-            else:
-                scheduler.set_timesteps(timesteps)
-            for param in unet.parameters():
-                param.requires_grad = False
-            
+        
             masks = []
             mask_indexes = data[i]['mask_indexes']
             masks_p = data[i]['mask_path']
@@ -170,5 +168,5 @@ else:
                     args.diffusion_type, timesteps, args.guide, masks, \
                     mask_indexes, args.res, output_dir + f'{data[i]["id"]}.png', \
                     eta=args.eta)
-            
+            torch.cuda.empty_cache()
             

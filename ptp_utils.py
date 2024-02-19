@@ -268,6 +268,7 @@ def lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embed
     if controller != None:
         latents = controller.step_callback(latents)
     del model_pred
+    del w_embedding
     return latents, _
 
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale):

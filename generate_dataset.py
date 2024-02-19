@@ -1,7 +1,7 @@
 import os 
 import torch
 from tqdm import tqdm
-from diffusers import DiffusionPipeline,UNet2DConditionModel
+from diffusers import DiffusionPipeline,UNet2DConditionModel,LatentConsistencyModelPipeline
 from ptp_utils import diffusion_step,latent2image,compute_embeddings,lcm_diffusion_step
 import argparse
 import numpy as np
@@ -39,7 +39,7 @@ MODEL_TYPE = torch.float16
 
 
 args = parser.parse_args()
-pipe = DiffusionPipeline.from_pretrained(repo_id)
+pipe =  DiffusionPipeline.from_pretrained("SimianLuo/LCM_Dreamshaper_v7")
 out_dir = "eval_lcm/"
 os.makedirs(out_dir,exist_ok = True)
 device = "cuda"
