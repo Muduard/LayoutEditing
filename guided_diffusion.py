@@ -8,7 +8,8 @@ from guide_utils import Guide
 from PIL import Image
 
 def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, mask, mask_index, resolution, out_path, loss_type="mse", eta=0.15):
-    
+    if mask_index > 76:
+        return
     lossM = torch.nn.MSELoss()
     
 
@@ -77,7 +78,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                 
         latents = latents.to(dtype=unet.dtype)
         step += 1
-        torch.cuda.memory._dump_snapshot()
+        
 
     with torch.no_grad():
         image = latent2image(vae, latents.detach())

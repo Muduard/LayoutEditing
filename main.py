@@ -42,6 +42,7 @@ parser.add_argument("--loss_type", type=str, default="mse")
 parser.add_argument("--eta", type=float, default=0.2)
 parser.add_argument("--method", type=str, default="new")
 parser.add_argument("--out_dir", type=str, default="test/")
+parser.add_argument("--benchmark", type=str, default="eval-filtered")
 MODEL_TYPE = torch.float16
 sl = False
 pytorch_version = torch.__version__
@@ -91,10 +92,6 @@ if args.from_file == None:
         latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
     prompts = [args.prompt]
 
-    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
     if args.diffusion_type == "LCM":
         scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
     else:
@@ -135,11 +132,11 @@ else:
         for i in tqdm(range(len(data))):
             
             # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
-            if major > 2 or (major == 2 and minor >= 0):
-                vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-                tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-                text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-                unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+            
+            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
             if args.diffusion_type == "LCM":
                 scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
             else:
@@ -151,7 +148,13 @@ else:
                 scheduler.set_timesteps(timesteps)
             for param in unet.parameters():
                 param.requires_grad = False
-            mask = cv2.imread(data[i]['mask_path'], cv2.IMREAD_GRAYSCALE)
+            
+            masks = []
+            mask_indexes = data[i]['mask_indexes']
+            masks_p = data[i]['mask_path']
+            for mask_p in masks_p:
+                masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
+                
             context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, [data[i]['caption']], 
                                 sd= False if args.diffusion_type =="LCM" else True)
@@ -159,13 +162,13 @@ else:
             latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
             if args.method == "new":
                 guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
-                    args.diffusion_type, timesteps, args.guide, mask, \
-                    data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
+                    args.diffusion_type, timesteps, args.guide, masks, \
+                    mask_indexes, args.res, output_dir + f'{data[i]["id"]}.png', \
                     loss_type=args.loss_type, eta=args.eta)
             else:
                 zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
-                    args.diffusion_type, timesteps, args.guide, mask, \
-                    data[i]['mask_index'], args.res, output_dir + f'{data[i]["id"]}.png', \
+                    args.diffusion_type, timesteps, args.guide, masks, \
+                    mask_indexes, args.res, output_dir + f'{data[i]["id"]}.png', \
                     eta=args.eta)
             
             

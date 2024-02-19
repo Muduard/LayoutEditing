@@ -25,7 +25,7 @@ n_datapoints = 1
 path1 = "./datasets/images/val2017/"#"datasets/annotations/cap_val2017.npz"#"datasets/images/val2017/"
 path2 = "./eval_lcm/"
 
-score = fid.compute_fid(path1, path2, dataset_res=512)
+score = fid.compute_fid(path1, path2)
 print(score)
 '''
 # Load and preprocess real images
