@@ -1,5 +1,6 @@
 import torch
 import cv2
+from queue import Queue
 #TODO add automatic mask resolution changing
 class Guide():
     
@@ -44,21 +45,33 @@ class Guide():
                 return tensor
     
     def fw_hook(self,module, input, output):
+        
         self.outputs.append(output)
         #Add modules only if we are in the first step
         if self.step == 0:
             self.modules.append(module)
+        
 
 
-    def register_hook(self, net_, count, place_in_unet, module_name=None):
-        if module_name in ["attn1", "attn2"]:
-            net_.register_forward_hook(self.fw_hook)
-            return count + 1
-        elif hasattr(net_, 'children'):
-            for k, net__ in net_.named_children():
-             count = self.register_hook(net__, count, place_in_unet, module_name=k)
-        self.count = count
-        return count
+    def register_hook(self, model, count, place_in_unet, module_name=None):
+        queue = Queue()
+        queue.put( (module_name, model) )
+
+        self.hooks = []
+
+        while not queue.empty():
+            module_name, module = queue.get()
+            
+            if module_name in ["attn1", "attn2"]:
+                self.hooks.append(module.register_forward_hook(self.fw_hook))  
+            elif hasattr(module, 'children'):
+                for module_name, child_module in module.named_children():
+                    queue.put( (module_name, child_module) )
+            
+        
+        self.count = len(self.hooks)
+        
+        
     
     def guide(self):
         if self.step == 0:
@@ -81,8 +94,7 @@ class Guide():
         #Generate target attention only for the first step because weights don't change
         with torch.no_grad():
             if self.step == 0:
-                o_unconds = []
-                o_texts = []
+                
                 for attn_module in self.modules:
                     
                     v = attn_module.to_v(self.context)
@@ -99,6 +111,7 @@ class Guide():
                     
                     out = self.reshape_batch_dim_to_heads(attn_module, out)
                     out = attn_module.to_out[0](out)
+                    
                     self.obj_attentions.append(out)
                 
                 self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
@@ -110,4 +123,8 @@ class Guide():
         del self.outputs
         self.outputs = []
         self.step += 1
-        
+
+    def reset(self):
+        del self.outputs
+        for hook in self.hooks:
+             hook.remove()

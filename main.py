@@ -2,7 +2,7 @@ import os
 import torch
 from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, LCMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
-from ptp_utils import AttentionStore,get_attn_layers,diffusion_step,get_multi_level_attention_from_average,register_attention_control, get_cross_attention, show_cross_attention,latent2image,save_tensor_as_image, lcm_diffusion_step, get_guidance_scale_embedding, compute_embeddings
+from ptp_utils import compute_embeddings
 import cv2
 import argparse
 from diffusers.models.attention_processor import AttnProcessor2_0

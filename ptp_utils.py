@@ -401,17 +401,7 @@ def register_attention_control(model, controller, attns = None):
 
 
 
-def get_attn_layers(model):
-    queue = list(model.named_children())
-    attn_layers = []
 
-    for module_name, children in queue:
-        if module_name in ["attn1", "attn2"]:
-            attn_layers.append(children)
-        else:
-            queue.extend(list(children.named_children()) )
-
-    return attn_layers
 def save_tensor_as_image(image, path, plot=False):
     saved = image.clone()
     saved = saved / saved.max()

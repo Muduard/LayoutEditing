@@ -58,17 +58,19 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             if diffusion_type == "SD":
                 grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
                 #0.2 SD #0.4 setting lcm
-                #del latents
+                del latents
                 latents = latents2 - eta * lambd[step]  * grad_x
             else:
                 grad_x = latents.grad
                 #0.2 SD #0.4 setting lcm
-                #del latents
+                
                 latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
-            #del latents2
-            #del grad_x
+            
+            del latents2
+            del grad_x
             latents = latents.to(dtype=unet.dtype)
             guide.reset_step()
+            unet.zero_grad()
         else:
             with torch.no_grad():
                 if diffusion_type == "LCM":
@@ -77,12 +79,13 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                     latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)  
         step += 1
         latents = latents.to(dtype=unet.dtype)
-
+    
     with torch.no_grad():
         image = latent2image(vae, latents.detach())
         image = Image.fromarray(image)
         image.save(out_path)
-    #del latents
-    #del context
+    guide.reset()
+    del latents
+    del context
     #del guide
     
