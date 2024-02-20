@@ -36,12 +36,13 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             guide.guide()
             
             if diffusion_type == "SD":
-                x = guide.outputs[guide.count:]
-                y = guide.obj_attentions[1]
+                x = guide.outputs
+                y = guide.obj_attentions
             else: 
                 x = guide.outputs
                 y = guide.obj_attentions
             l1 = 0
+            
             if loss_type == "cosine":
                 for l in range(x.shape[0]):
                     a = x[l].flatten()
@@ -49,16 +50,21 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                     l1 += 1 - torch.dot(a, b) / (a.norm() * b.norm())
             elif loss_type=="mse":
                 l1 = lossM(x, y)
-            
-                    
+                
                 #l1 = lossKL(torch.log(guide.outputs + eps), guide.obj_attentions)
             loss = l1 #+ l2
-            loss.backward()
             
-            grad_x = latents.grad #/ torch.max(torch.abs(latents.grad)) 
-             #0.2 SD #0.4 setting lcm
-            #del latents
-            latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
+            loss.backward()
+            if diffusion_type == "SD":
+                grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
+                #0.2 SD #0.4 setting lcm
+                #del latents
+                latents = latents2 - eta * lambd[step]  * grad_x
+            else:
+                grad_x = latents.grad
+                #0.2 SD #0.4 setting lcm
+                #del latents
+                latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
             #del latents2
             #del grad_x
             latents = latents.to(dtype=unet.dtype)

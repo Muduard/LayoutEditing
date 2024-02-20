@@ -71,9 +71,9 @@ class Guide():
             self.count = len(self.modules)
         
         out_indexes = self.indexes.copy()
-        if self.diffusion_type == "SD":
+        #if self.diffusion_type == "SD":
              
-             out_indexes.extend([(i + (len(self.outputs)//2)) for i in self.indexes])
+             #out_indexes.extend([(i + (len(self.outputs)//2)) for i in self.indexes])
              
         #Select correct modules and outputs
         self.outputs = [self.outputs[i] for i in out_indexes]
@@ -84,48 +84,24 @@ class Guide():
                 o_unconds = []
                 o_texts = []
                 for attn_module in self.modules:
-                    if len(self.context) == 2:
-                        v_uncond = attn_module.to_v(self.context[0].unsqueeze(0))
-                        v_uncond = self.reshape_heads_to_batch_dim(attn_module, v_uncond)
-                        v_text = attn_module.to_v(self.context[1].unsqueeze(0))
-                        v_text = self.reshape_heads_to_batch_dim(attn_module, v_text)
-                        
-                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 10
-                        for i, mask_index in enumerate(self.mask_indexes):
-                            obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * attn_module.heads)
-                        
-                        out = torch.einsum("b i j, b j d -> b i d", obj_attn, v_uncond)
-                        out = self.reshape_batch_dim_to_heads(attn_module, out)
-                        out_uncond = attn_module.to_out[0](out)
-
-                        out = torch.einsum("b i j, b j d -> b i d", obj_attn, v_text)
-                        out = self.reshape_batch_dim_to_heads(attn_module, out)
-                        out_text = attn_module.to_out[0](out)
-
-                        o_unconds.append(out_uncond)
-                        o_texts.append(out_text)
-                    else:
-                        v = attn_module.to_v(self.context)
-                        v = self.reshape_heads_to_batch_dim(attn_module, v)
-                        
-                        obj_attn = torch.randn((attn_module.heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 20
-                        if self.base_masks != None:
-                            for m in range(len(self.base_masks)):
-                                obj_attn[:, :, m] = torch.stack([self.base_masks[m].reshape(-1)] * attn_module.heads) / 10
-                        for i, mask_index in enumerate(self.mask_indexes):
-                            obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * attn_module.heads)
-                        
-                        out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
-                        
-                        out = self.reshape_batch_dim_to_heads(attn_module, out)
-                        out = attn_module.to_out[0](out)
-                        self.obj_attentions.append(out)
-                if len(self.context) == 2:
-                    self.obj_attentions = [torch.cat(o_unconds).to(dtype=self.dtype, device=self.device), 
-                                            torch.cat(o_texts).to(dtype=self.dtype, device=self.device)]
                     
-                else:
-                    self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
+                    v = attn_module.to_v(self.context)
+                    v = self.reshape_heads_to_batch_dim(attn_module, v)
+                    heads = attn_module.heads * len(self.context)
+                    obj_attn = torch.randn((heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 20
+                    if self.base_masks != None:
+                        for m in range(len(self.base_masks)):
+                            obj_attn[:, :, m] = torch.stack([self.base_masks[m].reshape(-1)] * heads) / 10
+                    for i, mask_index in enumerate(self.mask_indexes):
+                        obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * heads)
+                    
+                    out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
+                    
+                    out = self.reshape_batch_dim_to_heads(attn_module, out)
+                    out = attn_module.to_out[0](out)
+                    self.obj_attentions.append(out)
+                
+                self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
         
         self.outputs = torch.cat(self.outputs).to(dtype=self.dtype, device=self.device)
         
