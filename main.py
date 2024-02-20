@@ -63,27 +63,12 @@ else:
 
 timesteps = 50
 batch_size = 1
-guidance_scale = 3
+guidance_scale = 7
 torch.manual_seed(args.seed)
 
-vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-for param in unet.parameters():
-    param.requires_grad = False
 
-if args.diffusion_type == "LCM":
-    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-else:
-    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
-if args.diffusion_type == "LCM":
-    scheduler.set_timesteps(timesteps, original_inference_steps=50)
-else:
-    scheduler.set_timesteps(timesteps)
-
-torch.compile(unet, mode="reduce-overhead", fullgraph=True)
+#torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 if args.from_file == None:
     mask_index = int(args.mask_index[0])
     
@@ -152,7 +137,25 @@ else:
             masks_p = data[i]['mask_path']
             for mask_p in masks_p:
                 masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
-                
+            
+
+            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+            for param in unet.parameters():
+                param.requires_grad = False
+
+            if args.diffusion_type == "LCM":
+                scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+            else:
+                scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
+            if args.diffusion_type == "LCM":
+                scheduler.set_timesteps(timesteps, original_inference_steps=50)
+            else:
+                scheduler.set_timesteps(timesteps)
+
             context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, [data[i]['caption']], 
                                 sd= False if args.diffusion_type =="LCM" else True)

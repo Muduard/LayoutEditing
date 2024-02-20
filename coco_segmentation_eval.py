@@ -101,7 +101,7 @@ def generate_mask():
             mask_name = categories[cat_ids[i]]
             if mask_name not in caption:
                 caption = mask_name + " " + caption
-            mask_indexes = list(map(lambda x: x+2, mask_indexes))
+            mask_indexes = list(map(lambda x: x+1, mask_indexes))
             mask_indexes.append(caption.index(mask_name) + 1)
             mask_files.append(f"masks/{n}_{i}.png")
             cv2.imwrite(mask_files[i],mask)
@@ -124,28 +124,32 @@ def compute_iou(data_path):
         id = int(f[:-4])
         image = cv2.imread(f'{data_path}{id}.png')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        ann = coco.getAnnIds(id)
-        s = coco.loadAnns(ann)[0]
-        real_mask = coco.annToRLE(s)
+        anns = coco.getAnnIds(id)
+        file_ious = []
         predictor.set_image(image)
-        centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
-        input_point = np.array([centroid])
-        input_label = np.array([1])
-        masks, _, _ = predictor.predict(
-            point_coords=input_point,
-            point_labels=input_label,
-            multimask_output=True,
-        )
-        max_iou = 0
-        for m in masks:
-            pred_mask = np.asfortranarray(m)
-            pred_mask = mask_utils.encode(pred_mask)
-            iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
-            if iou > max_iou:
-                max_iou = iou
-        ious.append(max_iou)
+        for ann in anns:
+            s = coco.loadAnns(ann)[0]
+            real_mask = coco.annToRLE(s)
+            
+            centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
+            input_point = np.array([centroid])
+            input_label = np.array([1])
+            masks, _, _ = predictor.predict(
+                point_coords=input_point,
+                point_labels=input_label,
+                multimask_output=True,
+            )
+            max_iou = 0
+            for m in masks:
+                pred_mask = np.asfortranarray(m)
+                pred_mask = mask_utils.encode(pred_mask)
+                iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
+                if iou > max_iou:
+                    max_iou = iou
+            file_ious.append(max_iou)
+            
+        ious.append(sum(file_ious) / len(file_ious))
         bar.set_postfix_str(f'iou: {sum(ious) / len(ious)}')
-
     print(sum(ious) / len(ious))
 
 if args.task == "generate_mask":

@@ -57,10 +57,10 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             
             grad_x = latents.grad #/ torch.max(torch.abs(latents.grad)) 
              #0.2 SD #0.4 setting lcm
-            del latents
+            #del latents
             latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
-            del latents2
-            del grad_x
+            #del latents2
+            #del grad_x
             latents = latents.to(dtype=unet.dtype)
             guide.reset_step()
         else:
@@ -76,7 +76,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
         image = latent2image(vae, latents.detach())
         image = Image.fromarray(image)
         image.save(out_path)
-    del latents
-    del context
-    del guide
+    #del latents
+    #del context
+    #del guide
     
