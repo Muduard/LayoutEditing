@@ -61,7 +61,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
             #del latents2
             #del grad_x
-            
+            latents = latents.to(dtype=unet.dtype)
             guide.reset_step()
         else:
             with torch.no_grad():

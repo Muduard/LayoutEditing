@@ -273,11 +273,14 @@ def lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embed
 
 def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale):
     
-    latents = scheduler.scale_model_input(latents, t)
-    with torch.no_grad():
-        noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
+    #latents = scheduler.scale_model_input(latents, t)
+    latents_input = torch.cat([latents] * 2)
+    noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
+    noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
+    #with torch.no_grad():
+    #    noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]
     
-    noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
+    #noise_prediction_text = unet(latents, t, encoder_hidden_states=context[1].unsqueeze(0))["sample"]
     #noise_pred = unet(latents_input, t, encoder_hidden_states=context)["sample"]
     #noise_pred_uncond, noise_prediction_text = noise_pred.chunk(2)
     
