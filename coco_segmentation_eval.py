@@ -109,9 +109,9 @@ def generate_mask():
             mask_name = categories[cat_ids[i]].replace(" ","")
             
             if mask_name not in caption:
-                caption = mask_name + ". " + caption
+                caption = mask_name + " " + caption
             
-            mask_indexes = list(map(lambda x: x+4, mask_indexes))
+            mask_indexes = list(map(lambda x: x+1, mask_indexes))
             
             if mask_name in caption:
                 mask_indexes.append(count_word(caption,caption.index(mask_name)) + 1)

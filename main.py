@@ -66,6 +66,17 @@ batch_size = 1
 guidance_scale = 7
 torch.manual_seed(args.seed)
 
+vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
+tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
+text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
+unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+for param in unet.parameters():
+    param.requires_grad = False
+
+if args.diffusion_type == "LCM":
+    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+else:
+    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
 
 #torch.compile(unet, mode="reduce-overhead", fullgraph=True)
@@ -129,62 +140,40 @@ else:
         files = os.listdir(output_dir)
         data = data[len(files):]
         for i in tqdm(range(len(data))):
-            
-            # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
-            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-            for param in unet.parameters():
-                param.requires_grad = False
+            filename = output_dir + f'{data[i]["id"]}.png'
+            if not os.path.exists(filename):
+                # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
+                masks = []
+                mask_indexes = data[i]['mask_indexes']
+                if len(mask_indexes) > 0:
+                    masks_p = data[i]['mask_path']
+                    for mask_p in masks_p:
+                        masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
 
-            if args.diffusion_type == "LCM":
-                scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-            else:
-                scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+                    if args.diffusion_type == "LCM":
+                        scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+                    else:
+                        scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
-            if args.diffusion_type == "LCM":
-                scheduler.set_timesteps(timesteps, original_inference_steps=50)
-            else:
-                scheduler.set_timesteps(timesteps)
-            masks = []
-            mask_indexes = data[i]['mask_indexes']
-            masks_p = data[i]['mask_path']
-            for mask_p in masks_p:
-                masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
-            
+                    if args.diffusion_type == "LCM":
+                        scheduler.set_timesteps(timesteps, original_inference_steps=50)
+                    else:
+                        scheduler.set_timesteps(timesteps)
 
-            vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-            tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-            text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-            unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-            for param in unet.parameters():
-                param.requires_grad = False
-
-            if args.diffusion_type == "LCM":
-                scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-            else:
-                scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-
-            if args.diffusion_type == "LCM":
-                scheduler.set_timesteps(timesteps, original_inference_steps=50)
-            else:
-                scheduler.set_timesteps(timesteps)
-
-            context = compute_embeddings(tokenizer, text_encoder, device, 
-                                batch_size, [data[i]['caption']], 
-                                sd= False if args.diffusion_type =="LCM" else True)
-            
-            latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-            if args.method == "new":
-                guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
-                    args.diffusion_type, timesteps, args.guide, masks, \
-                    mask_indexes, args.res, output_dir + f'{data[i]["id"]}.png', \
-                    loss_type=args.loss_type, eta=args.eta)
-            else:
-                zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
-                    args.diffusion_type, timesteps, args.guide, masks, \
-                    mask_indexes, args.res, output_dir + f'{data[i]["id"]}.png', \
-                    eta=args.eta)
-            torch.cuda.empty_cache()
+                    context = compute_embeddings(tokenizer, text_encoder, device, 
+                                        batch_size, [data[i]['caption']], 
+                                        sd= False if args.diffusion_type =="LCM" else True)
+                    
+                    latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
+                    if args.method == "new":
+                        guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                            args.diffusion_type, timesteps, args.guide, masks, \
+                            mask_indexes, args.res, filename, \
+                            loss_type=args.loss_type, eta=args.eta)
+                    else:
+                        zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
+                            args.diffusion_type, timesteps, args.guide, masks, \
+                            mask_indexes, args.res, filename, \
+                            eta=args.eta)
+                
             

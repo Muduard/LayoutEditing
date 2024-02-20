@@ -4,11 +4,10 @@ from ptp_utils import AttentionStore,diffusion_step,get_multi_level_attention_fr
 
 import numpy as np
 from PIL import Image
-
-def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_scale, diffusion_type, timesteps, guide_flag, mask, mask_index, resolution, out_path, eta=1):
+import cv2
+def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_scale, diffusion_type, timesteps, guide_flag, masks_path, mask_indexes, resolution, out_path, eta=1):
     
-    if mask_index > 76:
-        return
+    
 
     lossF = torch.nn.BCELoss()
     lambd = torch.linspace(1, 0, timesteps // 2)
@@ -17,8 +16,18 @@ def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_s
     latents.retain_grad()
     controller = AttentionStore()
     register_attention_control(unet, controller, None)
+    acceptable_masks_indexes = []
+    for i in range(len(mask_indexes)):
+        if mask_indexes[i] < 77:
+            acceptable_masks_indexes.append(i)
+    
+    mask_indexes = [mask_indexes[i] for i in acceptable_masks_indexes]
+    masks = []
+    for i in acceptable_masks_indexes:
+        masks.append(torch.tensor(cv2.resize(masks_path[i], (resolution, resolution)), 
+                                        dtype=torch.float32, device=device) / 255)
 
-    mask = torch.tensor(mask, dtype=torch.float32, device=device) / 255
+    
     if diffusion_type == "LCM":
         w = torch.tensor(guidance_scale - 1).repeat(1).to(device=device, dtype=latents.dtype)
         w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim).to(
@@ -41,12 +50,17 @@ def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_s
             
             attention_maps16, _ = get_cross_attention(prompts, controller, res=resolution, from_where=["up", "down"])
             
-            attention_maps = attention_maps16.to(torch.float) 
-            s_hat = attention_maps[:,:,mask_index]  
+            attention_maps = attention_maps16.to(torch.float32) 
+            losses = []
+            
+            for i, mask_index in enumerate(mask_indexes):
+                s_hat = attention_maps[:,:,mask_index]
+                l = lossF(s_hat,masks[i]) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), masks[i])
+                
+                losses.append(l)
             #save_tensor_as_image(attention_maps[:,:,mask_index],"loss_attn.png", plot = True)
             
-            l1 = lossF(s_hat,mask) + lossF(s_hat / torch.linalg.norm(s_hat, ord=np.inf), mask)
-            loss = l1
+            loss = sum(losses)
             loss.backward()
             
             grad_x = latents.grad / torch.abs(latents.grad).max()
@@ -64,7 +78,7 @@ def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_s
                         attn = torch.where(attn < 0.4, -1, 1)
                 
                 if diffusion_type == "LCM":
-                    latents, _ = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
+                    latents, denoised = lcm_diffusion_step(unet, scheduler, controller, latents, context, t, w_embedding)
                 else:
                     latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
         latents = latents.to(dtype=unet.dtype)  
