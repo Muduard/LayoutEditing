@@ -80,6 +80,14 @@ def get_captions():
 
     return captions
 
+
+def count_word(sentence, index):
+    count = 0
+    for i in range(len(sentence[:index])):
+        if sentence[i] == " ":
+            count += 1
+    return count
+
 def generate_mask():
     
     captions = get_captions()
@@ -98,11 +106,16 @@ def generate_mask():
         mask_files = []
         for i, mask in enumerate(masks):
             
-            mask_name = categories[cat_ids[i]]
+            mask_name = categories[cat_ids[i]].replace(" ","")
+            
             if mask_name not in caption:
                 caption = mask_name + " " + caption
+            
             mask_indexes = list(map(lambda x: x+1, mask_indexes))
-            mask_indexes.append(caption.index(mask_name) + 1)
+            
+            if mask_name in caption:
+                mask_indexes.append(count_word(caption,caption.index(mask_name)) + 1)
+            
             mask_files.append(f"masks/{n}_{i}.png")
             cv2.imwrite(mask_files[i],mask)
         eval_json['image_data'].append({"caption": caption,\

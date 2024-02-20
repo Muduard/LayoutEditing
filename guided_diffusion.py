@@ -76,7 +76,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                 else:
                     latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)  
         step += 1
-        
+        latents = latents.to(dtype=unet.dtype)
 
     with torch.no_grad():
         image = latent2image(vae, latents.detach())
