@@ -101,7 +101,7 @@ if args.from_file == None:
     tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
     text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
     unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-    unet.set_attn_processor(AttnProcessor2_0())
+    #unet.set_attn_processor(AttnProcessor2_0())
     if args.diffusion_type == "LCM":
         scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
     else:
