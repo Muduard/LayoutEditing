@@ -6,9 +6,6 @@ import numpy as np
 from PIL import Image
 import cv2
 def zero_shot(scheduler, unet, vae, latents, context,prompts, device, guidance_scale, diffusion_type, timesteps, guide_flag, masks_path, mask_indexes, resolution, out_path, eta=1):
-    
-    
-
     lossF = torch.nn.BCELoss()
     lambd = torch.linspace(1, 0, timesteps // 2)
     step = 0
