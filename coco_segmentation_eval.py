@@ -127,7 +127,7 @@ def generate_mask():
 
 def compute_iou(data_path):
     coco=COCO('datasets/annotations/instances_val2017.json')
-    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to("cuda:1")
+    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to("cuda:0")
     predictor = SamPredictor(sam)
     predictor = predictor
     dataset = os.listdir(data_path)
@@ -143,7 +143,7 @@ def compute_iou(data_path):
         for ann in anns:
             s = coco.loadAnns(ann)[0]
             real_mask = coco.annToRLE(s)
-            
+
             centroid = [(s['bbox'][0] + s['bbox'][2]) / 2, (s['bbox'][1] + s['bbox'][3]) / 2]
             input_point = np.array([centroid])
             input_label = np.array([1])
@@ -154,9 +154,13 @@ def compute_iou(data_path):
             )
             max_iou = 0
             for m in masks:
-                pred_mask = np.asfortranarray(m)
+                pred_mask = cv2.resize(m.astype(np.uint8), real_mask['size'])
+                pred_mask = pred_mask.astype(bool)
+                pred_mask = np.asfortranarray(pred_mask)
+                
                 pred_mask = mask_utils.encode(pred_mask)
-                iou = abs(mask_utils.iou([pred_mask], [real_mask], [False, False])[0][0])
+                
+                iou = abs(mask_utils.iou([pred_mask], [real_mask], [False])[0][0])
                 if iou > max_iou:
                     max_iou = iou
             file_ious.append(max_iou)

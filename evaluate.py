@@ -23,7 +23,7 @@ def load_and_preprocess_image(image_path):
 
 n_datapoints = 1
 path1 = "./datasets/images/val2017/"#"datasets/annotations/cap_val2017.npz"#"datasets/images/val2017/"
-path2 = "./eval_lcm/"
+path2 = "./eval_new_multi_cos05/"
 
 score = fid.compute_fid(path1, path2)
 print(score)
