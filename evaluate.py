@@ -4,7 +4,7 @@ import torchvision.transforms as transforms
 import argparse
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
-parser.add_argument('--validation_path', default="./datasets/val2014/")
+parser.add_argument('--validation_path', default="./datasets/images/val2014/")
 parser.add_argument('--predicted_path', default="./results/")
 args = parser.parse_args()
 

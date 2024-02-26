@@ -84,7 +84,8 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
         image = latent2image(vae, latents.detach())
         image = Image.fromarray(image)
         image.save(out_path)
-    guide.reset()
+    if guide_flag:
+        guide.reset()
     del latents
     del context
     #del guide

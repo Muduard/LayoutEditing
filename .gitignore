@@ -14,3 +14,9 @@ trained_coco
 wandb
 segmentation
 cocoapi
+eval*
+mse*
+masks
+examples
+SD
+cosine*
