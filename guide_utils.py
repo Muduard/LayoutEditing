@@ -100,9 +100,9 @@ class Guide():
                     v = attn_module.to_v(self.context)
                     v = self.reshape_heads_to_batch_dim(attn_module, v)
                     heads = attn_module.heads * len(self.context)
-                    obj_attn = torch.randn((heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype) / 20
+                    obj_attn = torch.randn((heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype)
                     if self.base_masks != None:
-                        for m in range(len(self.base_masks)):
+                        for m in range(len(self.base_masks)):\
                             obj_attn[:, :, m] = torch.stack([self.base_masks[m].reshape(-1)] * heads) / 10
                     for i, mask_index in enumerate(self.mask_indexes):
                         obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * heads)

@@ -134,8 +134,8 @@ def compute_iou(data_path):
     ious = []
     bar = tqdm(dataset)
     for f in bar:
-        id = int(f[:-4])
-        image = cv2.imread(f'{data_path}{id}.png')
+        id = int(f[:-6])
+        image = cv2.imread(f'{data_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         anns = coco.getAnnIds(id)
         file_ious = []
