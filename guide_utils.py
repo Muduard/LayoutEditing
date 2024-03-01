@@ -4,7 +4,7 @@ from queue import Queue
 #TODO add automatic mask resolution changing
 class Guide():
     
-    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM"):
+    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="copy"):
         
         self.context = context
         acceptable_masks_indexes = []
@@ -29,6 +29,7 @@ class Guide():
         self.guidance_scale = guidance_scale
         self.base_masks = base_masks
         self.diffusion_type = diffusion_type
+        self.init_type = init_type
     
     def reshape_heads_to_batch_dim(self, module, tensor):
             batch_size, seq_len, dim = tensor.shape
@@ -95,25 +96,43 @@ class Guide():
         with torch.no_grad():
             if self.step == 0:
                 
-                for attn_module in self.modules:
-                    
-                    v = attn_module.to_v(self.context)
-                    v = self.reshape_heads_to_batch_dim(attn_module, v)
-                    heads = attn_module.heads * len(self.context)
-                    obj_attn = torch.randn((heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype)
-                    if self.base_masks != None:
-                        for m in range(len(self.base_masks)):\
-                            obj_attn[:, :, m] = torch.stack([self.base_masks[m].reshape(-1)] * heads) / 10
-                    for i, mask_index in enumerate(self.mask_indexes):
-                        obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * heads)
-                    
-                    out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
-                    
-                    out = self.reshape_batch_dim_to_heads(attn_module, out)
+                for i, attn_module in enumerate(self.modules):
+                    if self.init_type == "copy":
+                        v = attn_module.to_v(self.context).to(torch.float)
+                        vt = v.permute(0,2,1)
+                        o_i = self.outputs[i][0]
+                        o_i = o_i - attn_module.to_out[0].bias
+                        w = attn_module.to_out[0].weight.unsqueeze(0)
+                        o_i = o_i.T.unsqueeze(0).to(torch.float)
+                        w = w.to(torch.float)
+
+                        ob_i = torch.linalg.lstsq(w, o_i).solution.to(torch.float)
+                        attn = torch.linalg.lstsq(vt, ob_i).solution
+                        for i, mask_index in enumerate(self.mask_indexes):
+                            attn[:, mask_index, :] = self.masks[i].reshape(-1)
+                        
+                        attn = attn.permute(0,2,1)
+                        
+                        out = attn @ v
+                        
+                        out = out.to(torch.float16)
+                        
+                    else:
+                        v = attn_module.to_v(self.context)
+                        v = self.reshape_heads_to_batch_dim(attn_module, v)
+                        heads = attn_module.heads * len(self.context)
+                        obj_attn = torch.zeros((heads, self.resolution ** 2, 77), device=self.device, dtype=self.dtype)
+                        
+                        for i, mask_index in enumerate(self.mask_indexes):
+                            obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * heads)
+                        
+                        out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
+                        out = self.reshape_batch_dim_to_heads(attn_module, out)
+
                     out = attn_module.to_out[0](out)
-                    
+                        
                     self.obj_attentions.append(out)
-                
+
                 self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
         
         self.outputs = torch.cat(self.outputs).to(dtype=self.dtype, device=self.device)
