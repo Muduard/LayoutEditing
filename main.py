@@ -62,7 +62,7 @@ if args.diffusion_type == "LCM":
 else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
-timesteps = 50
+timesteps = 4
 batch_size = 1
 guidance_scale = 7
 torch.manual_seed(args.seed)

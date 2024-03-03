@@ -317,9 +317,9 @@ def compute_clip_score(real_path):
 
             
 
-compute_clip_score("eval_new_lcm_multi_eta05_r50/")
+#compute_clip_score("eval_new_lcm_multi_eta05_r50/")
 
-#if args.task == "generate_mask":
-#    generate_mask()
-#else:
-#    compute_iou(args.data_path)
+if args.task == "generate_mask":
+    generate_mask()
+else:
+    compute_iou(args.data_path)
