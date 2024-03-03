@@ -53,7 +53,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                 
                 #l1 = lossKL(torch.log(guide.outputs + eps), guide.obj_attentions)
             loss = l1 #+ l2
-            
+            print(x.shape)
             loss.backward()
             if diffusion_type == "SD":
                 grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
