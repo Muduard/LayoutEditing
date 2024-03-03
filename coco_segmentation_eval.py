@@ -134,6 +134,11 @@ def compute_iou(data_path):
     ious = []
     bar = tqdm(dataset)
     for f in bar:
+        #Legacy generation
+        if "_" not in f:
+            old_f = f
+            f = f[:-4] + "_0" + f[-4:]
+            os.rename(f'{data_path}{old_f}', f'{data_path}{f}')
         id = int(f[:-6])
         image = cv2.imread(f'{data_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
