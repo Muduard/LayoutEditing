@@ -115,8 +115,7 @@ def generate_mask():
             
             if mask_name not in caption:
                 caption = mask_name + " " + caption
-            
-            mask_indexes = list(map(lambda x: x+1, mask_indexes))
+                mask_indexes = list(map(lambda x: x+1, mask_indexes))
             
             if mask_name in caption:
                 mask_indexes.append(count_word(caption,caption.index(mask_name)) + 1)
@@ -139,6 +138,11 @@ def compute_iou(data_path):
     ious = []
     bar = tqdm(dataset)
     for f in bar:
+        #Legacy generation
+        if "_" not in f:
+            old_f = f
+            f = f[:-4] + "_0" + f[-4:]
+            os.rename(f'{data_path}{old_f}', f'{data_path}{f}')
         id = int(f[:-6])
         image = cv2.imread(f'{data_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

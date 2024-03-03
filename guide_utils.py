@@ -1,10 +1,11 @@
 import torch
 import cv2
 from queue import Queue
-#TODO add automatic mask resolution changing
+from ptp_utils import save_tensor_as_image
+
 class Guide():
     
-    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="copy"):
+    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="a"):
         
         self.context = context
         acceptable_masks_indexes = []
@@ -102,17 +103,21 @@ class Guide():
                         v = attn_module.to_v(self.context).to(torch.float)
                         vt = v.permute(0,2,1)
                         o_i = self.outputs[i][0]
-                        o_i = o_i - attn_module.to_out[0].bias
+                        #o_i = o_i - attn_module.to_out[0].bias
                         w = attn_module.to_out[0].weight.unsqueeze(0)
                         o_i = o_i.T.unsqueeze(0).to(torch.float)
                         w = w.to(torch.float)
 
                         ob_i = torch.linalg.lstsq(w, o_i).solution.to(torch.float)
                         attn = torch.linalg.lstsq(vt, ob_i).solution
-                        for i, mask_index in enumerate(self.mask_indexes):
-                            attn[:, mask_index, :] = self.masks[i].reshape(-1)
-                        
+                        for j, mask_index in enumerate(self.mask_indexes):
+                            attn[:, mask_index, :] = self.masks[j].reshape(-1)
+                        print(self.mask_indexes)
+                        for j in range(8):
+                            a = attn[0,j,:].reshape((32,32))
+                            save_tensor_as_image(a, f"{j}.png")
                         attn = attn.permute(0,2,1)
+                        
                         
                         out = attn @ v
                         
