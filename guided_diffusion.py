@@ -16,7 +16,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
         w = torch.tensor(guidance_scale - 1).repeat(1).to(device=device, dtype=latents.dtype)
         w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim)
     if guide_flag:
-        guide = Guide(context, masks, mask_indexes, resolution, device, unet.dtype, guidance_scale, None, diffusion_type)
+        guide = Guide(context, masks, mask_indexes, resolution, device, unet.dtype, guidance_scale, None, diffusion_type, init_type="null")
         guide.register_hook(unet,0,"")
     
     step = 0
@@ -35,12 +35,10 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             
             guide.guide()
             
-            if diffusion_type == "SD":
-                x = guide.outputs
-                y = guide.obj_attentions
-            else: 
-                x = guide.outputs
-                y = guide.obj_attentions
+            
+            x = guide.outputs
+            y = guide.obj_attentions
+        
             l1 = 0
             
             if loss_type == "cosine":

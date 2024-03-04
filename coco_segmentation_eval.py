@@ -24,7 +24,12 @@ parser.add_argument('--batch-size', type=int, default=50,
                     help='Batch size to use')
 parser.add_argument('--clip-model', type=str, default='ViT-B/32',
                     help='CLIP model to use')
+parser.add_argument('--cuda', type=int, default=-1)
 args = parser.parse_args()
+
+device = "cpu"
+if args.cuda > -1:
+     device = f'cuda:{args.cuda}'
 
 def create_mask_from_segmentation(id, coco):
     # Initialize an empty mask
@@ -131,7 +136,7 @@ def generate_mask():
 
 def compute_iou(data_path):
     coco=COCO('datasets/annotations/instances_val2017.json')
-    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to("cuda:0")
+    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to(device)
     predictor = SamPredictor(sam)
     predictor = predictor
     dataset = os.listdir(data_path)

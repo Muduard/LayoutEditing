@@ -99,6 +99,7 @@ class Guide():
                 
                 for i, attn_module in enumerate(self.modules):
                     if self.init_type == "copy":
+                        
                         v = attn_module.to_v(self.context).to(torch.float)
                         vt = v.permute(0,2,1)
                         o_i = self.outputs[i][0]

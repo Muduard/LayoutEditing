@@ -63,7 +63,6 @@ else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
 
-
 batch_size = 1
 guidance_scale = 7
 torch.manual_seed(args.seed)
@@ -76,7 +75,7 @@ for param in unet.parameters():
     param.requires_grad = False
 
 if args.diffusion_type == "LCM":
-    timesteps = 4
+    timesteps = 8
     scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 else:
     timesteps = 50
@@ -106,14 +105,12 @@ if args.from_file == None:
     text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
     unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
     #unet.set_attn_processor(AttnProcessor2_0())
+    
     if args.diffusion_type == "LCM":
-        scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-    else:
-        scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-
-    if args.diffusion_type == "LCM":
+        timesteps = 8
         scheduler.set_timesteps(timesteps, original_inference_steps=50)
     else:
+        timesteps = 50
         scheduler.set_timesteps(timesteps)
     for param in unet.parameters():
         param.requires_grad = False
@@ -161,12 +158,9 @@ else:
                 for mask_p in masks_p:
                     masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
 
+                
                 if args.diffusion_type == "LCM":
-                    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-                else:
-                    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
-
-                if args.diffusion_type == "LCM":
+                
                     scheduler.set_timesteps(timesteps, original_inference_steps=50)
                 else:
                     scheduler.set_timesteps(timesteps)

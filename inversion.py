@@ -99,7 +99,7 @@ image = Image.open(args.i).convert('RGB').resize((512,512))
 prompt = args.prompt
 
 context = compute_embeddings(tokenizer, text_encoder, device, 1, prompt, sd=True)
-guidance_scale = 8
+guidance_scale = 7
 num_inference_steps = 50
 scheduler.set_timesteps(num_inference_steps)
 image = to_tensor(image)
@@ -112,20 +112,17 @@ h = None
 new_attn = None
 ht = None
 
-controller = AttentionStore()
-register_attention_control(unet, controller, None)
-
 mask = torch.ones((1, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
 
 inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
                              ht=ht,mask_index=2,
-                            prompt=prompt, mask = mask , controller=controller)
+                            prompt=prompt, mask = mask , controller=None)
 
 
-attention_maps16, _ = get_cross_attention([prompt], controller, res=32, from_where=["up", "down"])
-words = prompt.split()
-for mask_index in range(len(words)):
-    save_tensor_as_image(attention_maps16[:, :, mask_index+1],f'masks/mask_{words[mask_index-1]}.png')
+
+controller = AttentionStore()
+register_attention_control(unet, controller, None)
+
 
 torch.save(inverted_latents[-1],f'starting_latent.pt')
 start_step = 5
@@ -135,3 +132,9 @@ with torch.no_grad():
         start_step=start_step, num_inference_steps=50)
 image = Image.fromarray(rec_image)
 image.save(f"a.png")
+attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+words = prompt.split()
+os.makedirs("attns/", exist_ok=True)
+for mask_index in range(len(words)):
+    save_tensor_as_image(attention_maps16[:, :, mask_index],f'attns/{mask_index}.png')
+
