@@ -424,14 +424,14 @@ def d_t(alpha_t_prev, eps_t):
     return (1-alpha_t_prev).sqrt()*eps_t
 
 def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference_steps, mask_index = 0, prompt = "", controller = None, ht = None, mask=None):
-    latents.requires_grad_(True)
+    
     timesteps = reversed(scheduler.timesteps)
     intermediate_latents = []
     
     for i in tqdm(range(1, num_inference_steps), total=num_inference_steps-1):
         t = timesteps[i]
 
-        latents = scheduler.scale_model_input(latents, t)
+        #latents = scheduler.scale_model_input(latents, t)
         
         with torch.no_grad():
             #noise_pred_uncond = unet(latents, t, encoder_hidden_states=context[0].unsqueeze(0))["sample"]

@@ -24,7 +24,12 @@ parser.add_argument('--batch-size', type=int, default=50,
                     help='Batch size to use')
 parser.add_argument('--clip-model', type=str, default='ViT-B/32',
                     help='CLIP model to use')
+parser.add_argument('--cuda', type=int, default=-1)
 args = parser.parse_args()
+
+device = "cpu"
+if args.cuda > -1:
+     device = f'cuda:{args.cuda}'
 
 def create_mask_from_segmentation(id, coco):
     # Initialize an empty mask
@@ -118,7 +123,7 @@ def generate_mask():
                 mask_indexes = list(map(lambda x: x+1, mask_indexes))
             
             if mask_name in caption:
-                mask_indexes.append(count_word(caption,caption.index(mask_name)) + 1)
+                mask_indexes.append(count_word(caption,caption.index(mask_name)) + 2)
             
             mask_files.append(f"masks/{n}_{i}.png")
             cv2.imwrite(mask_files[i],mask)
@@ -131,7 +136,7 @@ def generate_mask():
 
 def compute_iou(data_path):
     coco=COCO('datasets/annotations/instances_val2017.json')
-    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to("cuda:0")
+    sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to(device)
     predictor = SamPredictor(sam)
     predictor = predictor
     dataset = os.listdir(data_path)
@@ -143,7 +148,7 @@ def compute_iou(data_path):
             old_f = f
             f = f[:-4] + "_0" + f[-4:]
             os.rename(f'{data_path}{old_f}', f'{data_path}{f}')
-        id = int(f[:-6])
+        id = int(f[:f.index("_")])
         image = cv2.imread(f'{data_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         anns = coco.getAnnIds(id)
