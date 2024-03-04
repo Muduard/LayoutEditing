@@ -62,7 +62,8 @@ if args.diffusion_type == "LCM":
 else:
     repo_id = "runwayml/stable-diffusion-v1-5"
 
-timesteps = 50
+
+
 batch_size = 1
 guidance_scale = 7
 torch.manual_seed(args.seed)
@@ -75,8 +76,10 @@ for param in unet.parameters():
     param.requires_grad = False
 
 if args.diffusion_type == "LCM":
+    timesteps = 4
     scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 else:
+    timesteps = 50
     scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
 

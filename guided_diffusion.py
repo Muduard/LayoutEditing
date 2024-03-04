@@ -6,7 +6,7 @@ from ptp_utils import diffusion_step,latent2image, lcm_diffusion_step, get_guida
 
 from guide_utils import Guide
 from PIL import Image
-
+#TODO inversion
 def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, masks, mask_indexes, resolution, out_path, loss_type="mse", eta=0.15):
     
     lossM = torch.nn.MSELoss()
@@ -53,18 +53,18 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
                 
                 #l1 = lossKL(torch.log(guide.outputs + eps), guide.obj_attentions)
             loss = l1 #+ l2
-            print(x.shape)
+            
             loss.backward()
             if diffusion_type == "SD":
                 grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
                 #0.2 SD #0.4 setting lcm
-                del latents
+                
                 latents = latents2 - eta * lambd[step]  * grad_x
             else:
-                grad_x = latents.grad
+                grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
                 #0.2 SD #0.4 setting lcm
                 
-                latents = latents2 - eta * lambd[step]  * torch.sign(grad_x)
+                latents = latents2 - eta * lambd[step]  * grad_x
             
             del latents2
             del grad_x

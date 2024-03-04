@@ -118,7 +118,7 @@ def generate_mask():
                 mask_indexes = list(map(lambda x: x+1, mask_indexes))
             
             if mask_name in caption:
-                mask_indexes.append(count_word(caption,caption.index(mask_name)) + 1)
+                mask_indexes.append(count_word(caption,caption.index(mask_name)) + 2)
             
             mask_files.append(f"masks/{n}_{i}.png")
             cv2.imwrite(mask_files[i],mask)
@@ -143,7 +143,7 @@ def compute_iou(data_path):
             old_f = f
             f = f[:-4] + "_0" + f[-4:]
             os.rename(f'{data_path}{old_f}', f'{data_path}{f}')
-        id = int(f[:-6])
+        id = int(f[:f.index("_")])
         image = cv2.imread(f'{data_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         anns = coco.getAnnIds(id)
@@ -321,9 +321,9 @@ def compute_clip_score(real_path):
 
             
 
-compute_clip_score("eval_new_lcm_multi_eta05_r50/")
+#compute_clip_score("eval_new_lcm_multi_eta05_r50/")
 
-#if args.task == "generate_mask":
-#    generate_mask()
-#else:
-#    compute_iou(args.data_path)
+if args.task == "generate_mask":
+    generate_mask()
+else:
+    compute_iou(args.data_path)
