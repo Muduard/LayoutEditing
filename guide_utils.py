@@ -18,6 +18,7 @@ class Guide():
         for i in acceptable_masks_indexes:
              self.masks.append(torch.tensor(cv2.resize(masks[i], (resolution, resolution)), 
                                             dtype=dtype, device=device) / 255)
+        
         self.resolution = resolution
         self.obj_attentions = []
         

@@ -4,7 +4,13 @@ import numpy as np
 eta = [0.01, 0.1, 0.3, 0.5, 1]
 miou = [0.76, 0.77, 0.78, 0.82, 0.84]
 fid = [35.82, 36.37, 38.53, 38.61,41.75]
-
+with plt.style.context("seaborn-v0_8-poster"):
+    plt.title("Ablation of Eta on mIoU and FID")
+    plt.xlabel("FID")
+    plt.ylabel("mIoU")
+    plt.scatter(miou, fid)
+    plt.show()
+'''
 with plt.style.context("seaborn-v0_8-poster"):
     plt.title("Ablation of Eta on mIoU and FID")
     fig, ax1 = plt.subplots()
@@ -16,10 +22,11 @@ with plt.style.context("seaborn-v0_8-poster"):
     ax2.set_ylabel('mIoU', color="tab:red")
     ax2.plot(eta, miou, color="tab:red")
     ax2.scatter(eta, miou, color="tab:red")
-    plt.show()
-
-'''ran = [0, 0.02, 0.05, 0.2, 1]
-fid = [35.82, 37.58, 36.37, 38.61 ,36.31]
+    plt.show()'''
+'''
+ran = [0, 0.02, 0.05, 0.2, 1]
+#fid = [35.82, 37.58, 36.37, 38.61 ,39.4]
+fid = [35.82, 37.58, 37.92, 38.61 ,39.4]
 with plt.style.context("seaborn-v0_8-poster"):
     plt.xlabel("Perturbation")
     plt.ylabel("FID")

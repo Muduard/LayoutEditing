@@ -3,7 +3,9 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-h1 = cv2.imread("test/original/26.png", cv2.IMREAD_GRAYSCALE)
+h1 = cv2.imread("cat4.png")
 
-h1 = np.where(h1 < 180, 0, 255)
-cv2.imwrite("test/original/27.png",h1)
+h1 = np.where(h1 < 100, 0, 255)
+h1[:,:,0] = 0
+h1[:,:,1] = 0
+cv2.imwrite("cat5.png",h1)

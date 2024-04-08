@@ -202,6 +202,7 @@ class DummyDataset(Dataset):
         with open("eval.json", "r") as eval:
             data_eval = json.load(eval)['image_data']
             bar = tqdm(data_eval)
+            files = os.listdir(real_path)
             for image_data in bar:
                 id = image_data['id']
                 filename = f'{real_path}{id}.png'
@@ -209,6 +210,11 @@ class DummyDataset(Dataset):
                     self.reals.append(image_data['caption'])
                     
                     self.fake_folder.append(filename)
+                else:
+                    for f in files:
+                        if f'{id}' in f:
+                            self.reals.append(image_data['caption'])
+                            self.fake_folder.append(f'{real_path}{f}')
         print(len(self.reals))
         # assert self._check()
 
@@ -330,5 +336,7 @@ def compute_clip_score(real_path):
 
 if args.task == "generate_mask":
     generate_mask()
+elif args.task =="clip":
+    compute_clip_score(args.data_path)
 else:
     compute_iou(args.data_path)

@@ -32,7 +32,7 @@ parser.add_argument('--timesteps', default=50, type=int,
                     help="Number of timesteps")
 parser.add_argument('--prompt', default="A cat with a city in the background", 
                     type=str)
-parser.add_argument('--mask_index', nargs='+', help='List of token indices to move with a mask')
+parser.add_argument('--mask_index', type=str, help='List of token indices to move with a mask')
 parser.add_argument("--mask_path", type=str, help="Path of masks as image files with the name of the corresponding token")
 parser.add_argument("--resampling_steps", type=int, default=0, help="Resample noise for better coherence")
 parser.add_argument("--seed", type=int, default=42)
@@ -75,54 +75,40 @@ for param in unet.parameters():
     param.requires_grad = False
 
 if args.diffusion_type == "LCM":
-    timesteps = 8
+    timesteps = 50
     scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 else:
     timesteps = 50
     scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 
-
-#torch.compile(unet, mode="reduce-overhead", fullgraph=True)
+if args.diffusion_type == "LCM":
+    scheduler.set_timesteps(timesteps, original_inference_steps=50)
+else:
+    scheduler.set_timesteps(timesteps)
 if args.from_file == None:
-    mask_index = int(args.mask_index[0])
-    
-    h = None
-    new_attn = None
-    base_masks = []
-    if args.guide:
-        masks = os.listdir("masks/")
-        for f in masks:
-            base_masks.append(torch.tensor(cv2.imread("masks/" + f, cv2.IMREAD_GRAYSCALE)) / 255)
+    indices = args.mask_index.split(",")
+    mask_index = []
+    for i in indices:
+        mask_index.append(int(i))
 
     if not sl:
         latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
     else:
         latents = torch.load("starting_latent.pt",map_location=device).to(dtype=MODEL_TYPE)
     prompts = [args.prompt]
-
-    vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
-    tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
-    text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
-    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
-    #unet.set_attn_processor(AttnProcessor2_0())
-    
-    if args.diffusion_type == "LCM":
-        timesteps = 8
-        scheduler.set_timesteps(timesteps, original_inference_steps=50)
-    else:
-        timesteps = 50
-        scheduler.set_timesteps(timesteps)
-    for param in unet.parameters():
-        param.requires_grad = False
     
     context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
 
-    mask = torch.ones_like(latents)
-
-    guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
-                args.diffusion_type, timesteps, args.guide, h, \
-                mask_index, args.res, "./test/lcm_kl.png")
+    mask = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
+    
+    zero_shot(scheduler, unet, vae, latents, context, [args.prompt],device, guidance_scale, \
+                        args.diffusion_type, timesteps, args.guide, mask, \
+                        mask_index, args.res, args.out_dir +"1.png", \
+                        eta=args.eta)
+    #guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
+    #            args.diffusion_type, timesteps, args.guide, [mask], \
+    #            mask_index, args.res, args.out_dir +"1.png", eta=args.eta)
 else:
     #torch.cuda.memory._record_memory_history(enabled=True, device=device)
     with open(args.from_file, "r") as f:
@@ -157,13 +143,6 @@ else:
                 masks_p = data[i]['mask_path']
                 for mask_p in masks_p:
                     masks.append(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))
-
-                
-                if args.diffusion_type == "LCM":
-                
-                    scheduler.set_timesteps(timesteps, original_inference_steps=50)
-                else:
-                    scheduler.set_timesteps(timesteps)
 
                 context = compute_embeddings(tokenizer, text_encoder, device, 
                                     batch_size, [data[i]['caption']], 

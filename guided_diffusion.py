@@ -53,16 +53,11 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
             loss = l1 #+ l2
             
             loss.backward()
-            if diffusion_type == "SD":
-                grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
-                #0.2 SD #0.4 setting lcm
-                
-                latents = latents2 - eta * lambd[step]  * grad_x
-            else:
-                grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
-                #0.2 SD #0.4 setting lcm
-                
-                latents = latents2 - eta * lambd[step]  * grad_x
+            
+            grad_x = latents.grad / torch.max(torch.abs(latents.grad)) 
+            #0.2 SD #0.4 setting lcm
+            
+            latents = latents2 - eta * lambd[step]  * grad_x
             
             del latents2
             del grad_x
