@@ -2,7 +2,7 @@ import os
 import torch
 from diffusers import DDIMScheduler,AutoencoderKL,UNet2DConditionModel, LCMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
-from ptp_utils import compute_embeddings
+from ptp_utils import compute_embeddings,save_tensor_as_image,get_cross_attention,AttentionStore,register_attention_control
 import cv2
 import argparse
 from diffusers.models.attention_processor import AttnProcessor2_0
@@ -11,6 +11,7 @@ from guided_diffusion import guide_diffusion
 import pickle
 from zero_shot import zero_shot
 from tqdm import tqdm
+from natsort import natsorted
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
  #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
@@ -44,6 +45,10 @@ parser.add_argument("--method", type=str, default="new")
 parser.add_argument("--out_dir", type=str, default="test/")
 parser.add_argument("--benchmark", type=str, default="eval-filtered")
 parser.add_argument("--num_samples", default=5000)
+parser.add_argument("--start_step", type=int, default=0)
+parser.add_argument("--save_attentions", type=int, default=0)
+parser.add_argument("--edit", type=int, default=0)
+parser.add_argument("--edit_folder", type=str)
 MODEL_TYPE = torch.float16
 sl = False
 
@@ -64,7 +69,7 @@ else:
 
 
 batch_size = 1
-guidance_scale = 7
+guidance_scale = 3.5
 torch.manual_seed(args.seed)
 
 vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
@@ -86,11 +91,24 @@ if args.diffusion_type == "LCM":
 else:
     scheduler.set_timesteps(timesteps)
 if args.from_file == None:
-    indices = args.mask_index.split(",")
     mask_index = []
-    for i in indices:
-        mask_index.append(int(i))
-
+    masks = []
+    if args.guide:
+        if args.edit:
+            attns_files = os.listdir(args.edit_folder)
+            attns_files = list(map(lambda f: os.path.join(args.edit_folder,f), attns_files))
+            attns_files = natsorted(attns_files)
+            mask_index.extend(list(range(len(attns_files))))
+            print(mask_index)
+            for f in attns_files:
+                masks.append(cv2.imread(f, cv2.IMREAD_GRAYSCALE))
+                print(f)
+        else:
+            indices = args.mask_index.split(",")
+            
+            for i in indices:
+                mask_index.append(int(i))
+            masks.append(cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE))
     if not sl:
         latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
     else:
@@ -100,15 +118,28 @@ if args.from_file == None:
     context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
 
-    mask = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
     
-    zero_shot(scheduler, unet, vae, latents, context, [args.prompt],device, guidance_scale, \
-                        args.diffusion_type, timesteps, args.guide, mask, \
-                        mask_index, args.res, args.out_dir +"1.png", \
-                        eta=args.eta)
-    #guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
-    #            args.diffusion_type, timesteps, args.guide, [mask], \
-    #            mask_index, args.res, args.out_dir +"1.png", eta=args.eta)
+    
+    #zero_shot(scheduler, unet, vae, latents, context, [args.prompt],device, guidance_scale, \
+    #                    args.diffusion_type, timesteps, args.guide, mask, \
+    #                    mask_index, args.res, args.out_dir +"1.png", \
+    #                    eta=args.eta)
+    controller = None
+    if args.save_attentions:
+        controller = AttentionStore()
+        register_attention_control(unet, controller, None)
+    guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                args.diffusion_type, timesteps, args.guide, masks, \
+                mask_index, args.res, args.out_dir +"1.png", eta=args.eta, start_step=args.start_step)
+    if args.save_attentions:
+        attention_maps16, _ = get_cross_attention(prompts, controller, res=16, from_where=["up", "down"])
+        words = prompts[0].split()
+        words.insert(0, "cls")
+        
+        os.makedirs("attns/", exist_ok=True)
+        for mask_index in range(len(words)):
+            save_tensor_as_image(attention_maps16[:, :, mask_index],f'attns/{mask_index}_{words[mask_index]}.png')
+
 else:
     #torch.cuda.memory._record_memory_history(enabled=True, device=device)
     with open(args.from_file, "r") as f:

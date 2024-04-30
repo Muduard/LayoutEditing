@@ -32,6 +32,7 @@ class Guide():
         self.base_masks = base_masks
         self.diffusion_type = diffusion_type
         self.init_type = init_type
+        self.layer = 0
     
     def reshape_heads_to_batch_dim(self, module, tensor):
             batch_size, seq_len, dim = tensor.shape
@@ -149,6 +150,7 @@ class Guide():
         del self.outputs
         self.outputs = []
         self.step += 1
+        self.layer = 0
 
     def reset(self):
         del self.outputs

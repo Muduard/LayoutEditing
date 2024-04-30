@@ -444,7 +444,8 @@ def ddim_invert(unet, scheduler, latents, context, guidance_scale, num_inference
             alpha_t = scheduler.alphas_cumprod[current_t]
             alpha_t_next = scheduler.alphas_cumprod[next_t]
             latents = (latents - (1-alpha_t).sqrt()*noise_pred)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*noise_pred
-        
+            if controller != None:
+                latents = controller.step_callback(latents)
         
         torch.save(latents,f'inversion/{num_inference_steps - i}.pt')
         intermediate_latents.append(latents.detach())
@@ -502,3 +503,12 @@ def get_guidance_scale_embedding(w, embedding_dim=512, dtype=torch.float16):
             emb = torch.nn.functional.pad(emb, (0, 1))
         assert emb.shape == (w.shape[0], embedding_dim)
         return emb
+
+def run_and_display(prompts, controller, latent=None, run_baseline=False, generator=None):
+    if run_baseline:
+        print("w.o. prompt-to-prompt")
+        images, latent = run_and_display(prompts, EmptyControl(), latent=latent, run_baseline=False, generator=generator)
+        print("with prompt-to-prompt")
+    images, x_t = text2image_ldm_stable(ldm_stable, prompts, controller, latent=latent, num_inference_steps=NUM_DIFFUSION_STEPS, guidance_scale=GUIDANCE_SCALE, generator=generator, low_resource=LOW_RESOURCE)
+    view_images(images)
+    return images, x_t

@@ -114,27 +114,36 @@ ht = None
 
 mask = torch.ones((1, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
 
-inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
-                             ht=ht,mask_index=2,
-                            prompt=prompt, mask = mask , controller=None)
-
-
-
 controller = AttentionStore()
 register_attention_control(unet, controller, None)
+with torch.no_grad():
+    inverted_latents = ddim_invert(unet, scheduler, l, context, guidance_scale, 50, 
+                                ht=ht,mask_index=2,
+                                prompt=prompt, mask = mask , controller=controller)
 
+attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
+words = prompt.split()
+os.makedirs("attns/", exist_ok=True)
+for mask_index in range(len(words)):
+    save_tensor_as_image(attention_maps16[:, :, mask_index],f'attns/{mask_index}.png')
 
-torch.save(inverted_latents[-1],f'starting_latent.pt')
 start_step = 5
+torch.save(inverted_latents[-start_step],f'starting_latent.pt')
+
+
+scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=MODEL_TYPE)
+pipe = StableDiffusionPipeline.from_pretrained(repo_id, scheduler=scheduler, torch_dtype=MODEL_TYPE)
+pipe = pipe.to(device)
+vae = pipe.vae
+tokenizer = pipe.tokenizer
+text_encoder = pipe.text_encoder
+unet = pipe.unet
+
+
 
 with torch.no_grad():
     rec_image = sample(start_latents=inverted_latents[-(start_step+1)][None][0], \
         start_step=start_step, num_inference_steps=50)
 image = Image.fromarray(rec_image)
 image.save(f"a.png")
-attention_maps16, _ = get_cross_attention([prompt], controller, res=16, from_where=["up", "down"])
-words = prompt.split()
-os.makedirs("attns/", exist_ok=True)
-for mask_index in range(len(words)):
-    save_tensor_as_image(attention_maps16[:, :, mask_index],f'attns/{mask_index}.png')
 
