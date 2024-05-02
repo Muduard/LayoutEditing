@@ -99,7 +99,7 @@ if args.from_file == None:
             attns_files = list(map(lambda f: os.path.join(args.edit_folder,f), attns_files))
             attns_files = natsorted(attns_files)
             mask_index.extend(list(range(len(attns_files))))
-            print(mask_index)
+            
             for f in attns_files:
                 masks.append(cv2.imread(f, cv2.IMREAD_GRAYSCALE))
                 print(f)
@@ -141,7 +141,7 @@ if args.from_file == None:
             save_tensor_as_image(attention_maps16[:, :, mask_index],f'attns/{mask_index}_{words[mask_index]}.png')
 
 else:
-    #torch.cuda.memory._record_memory_history(enabled=True, device=device)
+    
     with open(args.from_file, "r") as f:
         data = json.load(f)['image_data']
         #losses = ["cosine"]
@@ -167,7 +167,7 @@ else:
                 filename = output_dir + f'{data[i]["id"]}_{k}.png'
                 k += 1
 
-            # Check if the major version is greater than 2 or if the major version is 2 and the minor version is greater than 0
+           
             masks = []
             mask_indexes = data[i]['mask_indexes']
             if len(mask_indexes) > 0:

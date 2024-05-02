@@ -296,7 +296,7 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
 
 
 
-def register_attention_control(model, controller, attns = None):
+def register_attention_control(model, controller, attns = None, attnsi = None):
     def ca_forward(self, place_in_unet):
         to_out = self.to_out
         
@@ -351,9 +351,17 @@ def register_attention_control(model, controller, attns = None):
             w = 0.5 * sim.max()
             #pww
             if attns != None:
-                additional_attn = attns[f'{sim.shape[1]}']
-                additional_attn = torch.cat([additional_attn,additional_attn])
-            
+                #additional_attn = attns[f'{sim.shape[1]}']
+                #additional_attn = torch.cat([additional_attn,additional_attn])
+                if len(attns) > 0:
+                    additional_attn = torch.zeros_like(sim)
+                    
+                    if additional_attn.shape[1] == attns[0].shape[0] ** 2 and additional_attn.shape[2] == 77:
+                        for arr_index,att_index in enumerate(attnsi):
+                            a = attns[arr_index].flatten().unsqueeze(0).repeat(additional_attn.shape[0],1)
+                            
+                            additional_attn[:,:,att_index] = a
+                
             # attention, what we cannot get enough of
             attn = F.softmax(sim + w * additional_attn,dim=-1)
             
