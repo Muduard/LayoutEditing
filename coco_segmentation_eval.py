@@ -153,6 +153,7 @@ def compute_iou(data_path):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         anns = coco.getAnnIds(id)
         file_ious = []
+        
         predictor.set_image(image)
         for ann in anns:
             s = coco.loadAnns(ann)[0]
@@ -174,8 +175,8 @@ def compute_iou(data_path):
                 if iou > max_iou:
                     max_iou = iou
             file_ious.append(max_iou)
-            
-        ious.append(sum(file_ious) / len(file_ious))
+        if len(file_ious) > 0:
+            ious.append(sum(file_ious) / len(file_ious))
         bar.set_postfix_str(f'iou: {sum(ious) / len(ious)}')
     print(sum(ious) / len(ious))
 

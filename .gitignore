@@ -30,3 +30,7 @@ presentazione
 attns
 inversion
 *.pt
+controlnet
+pww
+synthesized_image
+*.tar.gz

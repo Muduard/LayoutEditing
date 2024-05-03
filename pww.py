@@ -57,8 +57,8 @@ with open("eval.json", "r") as f:
                 masks_p = data[i]['mask_path']
                 for mask_p in masks_p:
                     masks.append(torch.tensor(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))/255)
-            controller = AttentionStore()
-            register_attention_control(unet, controller, masks, mask_indexes)
+            #controller = AttentionStore()
+            #register_attention_control(unet, controller, masks, mask_indexes)
 
             latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
             scheduler.set_timesteps(timesteps)
@@ -69,7 +69,7 @@ with open("eval.json", "r") as f:
             with torch.no_grad():
                 for t in tqdm(scheduler.timesteps):
                         
-                        latents, _ = diffusion_step(unet, scheduler, controller, latents, context, t, guidance_scale)
+                        latents, _ = diffusion_step(unet, scheduler, None, latents, context, t, guidance_scale)
                         
                 image = latent2image(vae, latents.detach())
                 image = Image.fromarray(image)
