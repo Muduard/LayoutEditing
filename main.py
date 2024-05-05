@@ -70,7 +70,6 @@ else:
 
 batch_size = 1
 guidance_scale = 3.5
-torch.manual_seed(args.seed)
 
 vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
 tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
@@ -81,10 +80,10 @@ for param in unet.parameters():
 
 if args.diffusion_type == "LCM":
     timesteps = 50
-    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+    scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler")
 else:
     timesteps = 50
-    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+    scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler")
 
 if args.diffusion_type == "LCM":
     scheduler.set_timesteps(timesteps, original_inference_steps=50)

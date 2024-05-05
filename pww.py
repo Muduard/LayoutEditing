@@ -8,7 +8,7 @@ import json
 from tqdm import tqdm
 from PIL import Image
 MODEL_TYPE = torch.float16
-device = "cuda:0"
+device = "cuda:1"
 batch_size = 1
 
 repo_id = "runwayml/stable-diffusion-v1-5"
@@ -57,8 +57,8 @@ with open("eval.json", "r") as f:
                 masks_p = data[i]['mask_path']
                 for mask_p in masks_p:
                     masks.append(torch.tensor(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))/255)
-            #controller = AttentionStore()
-            #register_attention_control(unet, controller, masks, mask_indexes)
+            controller = AttentionStore()
+            register_attention_control(unet, controller, masks, mask_indexes)
 
             latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
             scheduler.set_timesteps(timesteps)
