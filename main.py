@@ -159,6 +159,10 @@ else:
         sample_indices = torch.rand(num_samples) * len(data)
         
         for i in tqdm(sample_indices):
+            if args.diffusion_type == "LCM":
+                scheduler.set_timesteps(timesteps, original_inference_steps=50)
+            else:
+                scheduler.set_timesteps(timesteps)
             i = int(i)
             k = 0
             filename = output_dir + f'{data[i]["id"]}_{k}.png'
