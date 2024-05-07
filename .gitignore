@@ -34,3 +34,5 @@ controlnet
 pww
 synthesized_image
 *.tar.gz
+paper*
+SD2
