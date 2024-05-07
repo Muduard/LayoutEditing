@@ -11,7 +11,7 @@ MODEL_TYPE = torch.float16
 device = "cuda:0"
 batch_size = 1
 
-repo_id = "runwayml/stable-diffusion-v1-5"
+repo_id = "SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5"
 vae = AutoencoderKL.from_pretrained(repo_id, subfolder="vae", torch_dtype=MODEL_TYPE).to(device)
 tokenizer = CLIPTokenizer.from_pretrained(repo_id, subfolder="tokenizer", torch_dtype=MODEL_TYPE)
 text_encoder = CLIPTextModel.from_pretrained(repo_id, subfolder="text_encoder", torch_dtype=MODEL_TYPE).to(device)
@@ -21,7 +21,9 @@ for param in unet.parameters():
 
 
 timesteps = 50
-scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+#scheduler = DDIMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
+
+scheduler = LCMScheduler.from_pretrained(repo_id,subfolder="scheduler", torch_dtype=torch.float16)
 guidance_scale = 3.5
 
 torch.manual_seed(0)
@@ -36,7 +38,7 @@ with open("eval.json", "r") as f:
         #        output_dir = f"./test/{args.loss_type}_{e}/"
         #        os.makedirs(output_dir,exist_ok=True)
         #        print(f"Generating with loss: {args.loss_type} and eta: {e}")
-        output_dir = "pww/"
+        output_dir = "lcm_pww/"
         os.makedirs(output_dir, exist_ok=True)
         files = os.listdir(output_dir)
         num_samples = 5000 - len(files)
@@ -57,11 +59,11 @@ with open("eval.json", "r") as f:
                 masks_p = data[i]['mask_path']
                 for mask_p in masks_p:
                     masks.append(torch.tensor(cv2.imread(mask_p, cv2.IMREAD_GRAYSCALE))/255)
-            #controller = AttentionStore()
-            #register_attention_control(unet, controller, masks, mask_indexes)
+            controller = AttentionStore()
+            register_attention_control(unet, controller, masks, mask_indexes)
 
             latents = torch.randn((batch_size, 4, 64, 64), dtype=MODEL_TYPE, device=device) 
-            scheduler.set_timesteps(timesteps)
+            scheduler.set_timesteps(timesteps, original_inference_steps=50)
             context = compute_embeddings(tokenizer, text_encoder, device, 
                                     batch_size, [data[i]['caption']], 
                                     sd = True)
