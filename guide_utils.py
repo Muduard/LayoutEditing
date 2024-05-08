@@ -5,7 +5,7 @@ from ptp_utils import save_tensor_as_image
 
 class Guide():
     
-    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="a"):
+    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="a",glue="concat"):
         
         self.context = context
         acceptable_masks_indexes = []
@@ -33,6 +33,7 @@ class Guide():
         self.diffusion_type = diffusion_type
         self.init_type = init_type
         self.layer = 0
+        self.glue = glue
     
     def reshape_heads_to_batch_dim(self, module, tensor):
             batch_size, seq_len, dim = tensor.shape
@@ -140,11 +141,16 @@ class Guide():
                     out = attn_module.to_out[0](out)
                         
                     self.obj_attentions.append(out)
-
+                
+                
                 self.obj_attentions = torch.cat(self.obj_attentions).to(dtype=self.dtype, device=self.device)
+                if self.glue == "mean":
+                     self.obj_attentions = torch.mean(self.obj_attentions, dim=0)
+        
         
         self.outputs = torch.cat(self.outputs).to(dtype=self.dtype, device=self.device)
-        
+        if self.glue == "mean":
+            self.outputs = torch.mean(self.outputs, dim=0)
 
     def reset_step(self):
         del self.outputs

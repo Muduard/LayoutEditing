@@ -36,3 +36,5 @@ synthesized_image
 *.tar.gz
 paper*
 SD2
+lcm_pww
+*.zip

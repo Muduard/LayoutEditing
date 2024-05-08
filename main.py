@@ -49,6 +49,7 @@ parser.add_argument("--start_step", type=int, default=0)
 parser.add_argument("--save_attentions", type=int, default=0)
 parser.add_argument("--edit", type=int, default=0)
 parser.add_argument("--edit_folder", type=str)
+parser.add_argument("--glue", type=str)
 MODEL_TYPE = torch.float16
 sl = False
 
@@ -187,7 +188,7 @@ else:
                     guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
                         args.diffusion_type, timesteps, args.guide, masks, \
                         mask_indexes, args.res, filename, \
-                        loss_type=args.loss_type, eta=args.eta)
+                        loss_type=args.loss_type, eta=args.eta, glue=args.glue)
                 else:
                     zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
                         args.diffusion_type, timesteps, args.guide, masks, \
