@@ -7,7 +7,7 @@ from ptp_utils import diffusion_step,latent2image, lcm_diffusion_step, get_guida
 from guide_utils import Guide
 from PIL import Image
 
-def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, masks, mask_indexes, resolution, out_path, loss_type="l2", eta=0.15, start_step=0, glue="concat"):
+def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, diffusion_type, timesteps, guide_flag, masks, mask_indexes, resolution, out_path, loss_type="l2", eta=0.15, start_step=0, glue="concat", pww=0):
     
     lossM = torch.nn.MSELoss()
     lossL1 = torch.nn.L1Loss()
@@ -16,7 +16,7 @@ def guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_sca
         w = torch.tensor(guidance_scale - 1).repeat(1).to(device=device, dtype=latents.dtype)
         w_embedding = get_guidance_scale_embedding(w, embedding_dim=unet.config.time_cond_proj_dim)
     if guide_flag:
-        guide = Guide(context, masks, mask_indexes, resolution, device, unet.dtype, guidance_scale, None, diffusion_type, init_type="null", glue=glue)
+        guide = Guide(context, masks, mask_indexes, resolution, device, unet.dtype, guidance_scale, None, diffusion_type, init_type="null", glue=glue,pww=pww)
         guide.register_hook(unet,0,"")
     
     step = 0

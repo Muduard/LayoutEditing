@@ -8,6 +8,7 @@ import argparse
 from diffusers.models.attention_processor import AttnProcessor2_0
 import json
 from guided_diffusion import guide_diffusion
+from new_pww import guide_diffusion_pww
 import pickle
 from zero_shot import zero_shot
 from tqdm import tqdm
@@ -50,6 +51,7 @@ parser.add_argument("--save_attentions", type=int, default=0)
 parser.add_argument("--edit", type=int, default=0)
 parser.add_argument("--edit_folder", type=str)
 parser.add_argument("--glue", type=str)
+parser.add_argument("--pww", type=int, default=0)
 MODEL_TYPE = torch.float16
 sl = False
 
@@ -189,6 +191,12 @@ else:
                         args.diffusion_type, timesteps, args.guide, masks, \
                         mask_indexes, args.res, filename, \
                         loss_type=args.loss_type, eta=args.eta, glue=args.glue)
+                elif args.method == "pww":
+                    #pww
+                    guide_diffusion_pww(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                        args.diffusion_type, timesteps, args.guide, masks, \
+                        mask_indexes, args.res, filename, \
+                        glue=args.glue,pww=1)
                 else:
                     zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
                         args.diffusion_type, timesteps, args.guide, masks, \

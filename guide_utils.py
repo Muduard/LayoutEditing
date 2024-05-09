@@ -5,7 +5,7 @@ from ptp_utils import save_tensor_as_image
 
 class Guide():
     
-    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="a",glue="concat"):
+    def __init__(self,context, masks, mask_indexes, resolution, device, dtype, guidance_scale, base_masks=None, diffusion_type="LCM", init_type="a",glue="concat",pww=0):
         
         self.context = context
         acceptable_masks_indexes = []
@@ -34,6 +34,7 @@ class Guide():
         self.init_type = init_type
         self.layer = 0
         self.glue = glue
+        self.pww = pww
     
     def reshape_heads_to_batch_dim(self, module, tensor):
             batch_size, seq_len, dim = tensor.shape
@@ -55,7 +56,8 @@ class Guide():
         #Add modules only if we are in the first step
         if self.step == 0:
             self.modules.append(module)
-        
+        elif self.pww and output[self.layer].shape[1] == self.resolution**2:
+            output += 0.01 * self.obj_attentions[self.layer]
 
 
     def register_hook(self, model, count, place_in_unet, module_name=None):
@@ -99,7 +101,6 @@ class Guide():
         #Generate target attention only for the first step because weights don't change
         with torch.no_grad():
             if self.step == 0:
-                
                 for i, attn_module in enumerate(self.modules):
                     if self.init_type == "copy":
                         
