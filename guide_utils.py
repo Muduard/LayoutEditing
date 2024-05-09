@@ -57,7 +57,7 @@ class Guide():
         if self.step == 0:
             self.modules.append(module)
         elif self.pww and output[self.layer].shape[1] == self.resolution**2:
-            output += 0.01 * self.obj_attentions[self.layer]
+            output += self.obj_attentions[self.layer]
 
 
     def register_hook(self, model, count, place_in_unet, module_name=None):
@@ -135,7 +135,9 @@ class Guide():
                         
                         for i, mask_index in enumerate(self.mask_indexes):
                             obj_attn[:, :, mask_index] = torch.stack([self.masks[i].reshape(-1)] * heads)
-                        
+                        #pww
+                        if self.pww:
+                            obj_attn *= 0.1
                         out = torch.einsum("b i j, b j d -> b i d", obj_attn, v)
                         out = self.reshape_batch_dim_to_heads(attn_module, out)
 

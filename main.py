@@ -13,6 +13,7 @@ import pickle
 from zero_shot import zero_shot
 from tqdm import tqdm
 from natsort import natsorted
+from attention_diffusion import att_diff
 #device = "cuda"#torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
  #"SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5" #"SimianLuo/LCM_Dreamshaper_v7" #"CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"#"CompVis/stable-diffusion-v1-4"#"runwayml/stable-diffusion-v1-5"#"CompVis/stable-diffusion-v1-4"#
 
@@ -104,7 +105,7 @@ if args.from_file == None:
             
             for f in attns_files:
                 masks.append(cv2.imread(f, cv2.IMREAD_GRAYSCALE))
-                print(f)
+                
         else:
             indices = args.mask_index.split(",")
             
@@ -197,6 +198,31 @@ else:
                         args.diffusion_type, timesteps, args.guide, masks, \
                         mask_indexes, args.res, filename, \
                         glue=args.glue,pww=1)
+                elif args.method == "new_attn":
+                    att_diff(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                        args.diffusion_type, timesteps, filename, \
+                         glue=args.glue, prompt=data[i]['caption'])
+                    
+                    #fill masks
+                    attns_files = os.listdir("attns/")
+                    attns_files = list(map(lambda f: os.path.join("attns/",f), attns_files))
+                    attns_files = natsorted(attns_files)
+                    local_masks = []
+                    for f in attns_files:
+                        local_masks.append(cv2.imread(f, cv2.IMREAD_GRAYSCALE))
+                    for i, mask_i in enumerate(mask_indexes):
+                        local_masks[mask_i] = masks[i]
+                    masks = local_masks
+                    mask_indexes = list(range(len(attns_files)))
+
+                    unet = UNet2DConditionModel.from_pretrained(repo_id, subfolder="unet", torch_dtype=MODEL_TYPE).to(device)
+                    for param in unet.parameters():
+                        param.requires_grad = False
+                    guide_diffusion(scheduler, unet, vae, latents, context, device, guidance_scale, \
+                        args.diffusion_type, timesteps, False, masks, \
+                        mask_indexes, args.res, filename, \
+                        loss_type=args.loss_type, eta=args.eta, glue=args.glue)
+                    
                 else:
                     zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
                         args.diffusion_type, timesteps, args.guide, masks, \
