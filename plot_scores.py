@@ -1,14 +1,15 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-eta = [0.01, 0.1, 0.3, 0.5, 1]
-miou = [0.76, 0.77, 0.78, 0.82, 0.84]
-fid = [35.82, 36.37, 38.53, 38.61,41.75]
+eta = [0.01, 0.05, 0.1]
+miou = [0.80, 0.81, 0.84]
+fid = [19.29, 21.24, 29.10]
 with plt.style.context("seaborn-v0_8-poster"):
     plt.title("Ablation of Eta on mIoU and FID")
-    plt.xlabel("FID")
-    plt.ylabel("mIoU")
+    plt.xlabel("mIoU")
+    plt.ylabel("FID")
     plt.scatter(miou, fid)
+    plt.plot(miou, fid)
     plt.show()
 '''
 with plt.style.context("seaborn-v0_8-poster"):

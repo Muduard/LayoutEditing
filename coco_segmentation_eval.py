@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 
 parser = argparse.ArgumentParser(description='Stable Diffusion Layout Editing')
 parser.add_argument('--task', default="generate_mask")
-parser.add_argument('--data_path', default="test/")
+parser.add_argument('--output_path', default="test/")
 parser.add_argument('--batch-size', type=int, default=50,
                     help='Batch size to use')
 parser.add_argument('--clip-model', type=str, default='ViT-B/32',
@@ -106,7 +106,7 @@ def generate_mask():
     coco=COCO('datasets/annotations/instances_val2017.json')    
     id_list = list(scs.keys())
     eval_json = {"image_data": []}
-    os.makedirs("masks/", exist_ok=True)
+    os.makedirs(args.output_path, exist_ok=True)
     for n in tqdm(id_list):
         
         #if n in segmentations and n in widths and n in heights:
@@ -125,8 +125,8 @@ def generate_mask():
             if mask_name in caption:
                 mask_indexes.append(count_word(caption,caption.index(mask_name)) + 2)
             
-            mask_files.append(f"masks/{n}_{i}.png")
-            cv2.imwrite(mask_files[i],mask)
+            mask_files.append(f"{args.output_path}{n}_{i}.png")
+            cv2.imwrite(mask_files[i], mask)
         eval_json['image_data'].append({"caption": caption,\
             "mask_path": mask_files, "mask_indexes": mask_indexes, "id": n})
             
@@ -134,12 +134,12 @@ def generate_mask():
         json.dump(eval_json, f)
 
 
-def compute_iou(data_path):
+def compute_iou(output_path):
     coco=COCO('datasets/annotations/instances_val2017.json')
     sam = sam_model_registry["vit_h"](checkpoint="segmentation/sam_vit_h_4b8939.pth").to(device)
     predictor = SamPredictor(sam)
     predictor = predictor
-    dataset = os.listdir(data_path)
+    dataset = os.listdir(output_path)
     ious = []
     bar = tqdm(dataset)
     for f in bar:
@@ -147,9 +147,9 @@ def compute_iou(data_path):
         if "_" not in f:
             old_f = f
             f = f[:-4] + "_0" + f[-4:]
-            os.rename(f'{data_path}{old_f}', f'{data_path}{f}')
+            os.rename(f'{output_path}{old_f}', f'{output_path}{f}')
         id = int(f[:f.index("_")])
-        image = cv2.imread(f'{data_path}{f}')
+        image = cv2.imread(f'{output_path}{f}')
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         anns = coco.getAnnIds(id)
         file_ious = []
@@ -294,10 +294,7 @@ def calculate_clip_score(dataloader, model, real_flag, fake_flag):
         # normalize features
         real_features = real_features / real_features.norm(dim=1, keepdim=True).to(torch.float32)
         fake_features = fake_features / fake_features.norm(dim=1, keepdim=True).to(torch.float32)
-        
-        # calculate scores
-        # score = logit_scale * real_features @ fake_features.t()
-        # score_acc += torch.diag(score).sum()
+
         score = logit_scale * (fake_features * real_features).sum()
         score_acc += score
         sample_num += real.shape[0]
@@ -338,6 +335,6 @@ def compute_clip_score(real_path):
 if args.task == "generate_mask":
     generate_mask()
 elif args.task =="clip":
-    compute_clip_score(args.data_path)
+    compute_clip_score(args.output_path)
 else:
-    compute_iou(args.data_path)
+    compute_iou(args.output_path)

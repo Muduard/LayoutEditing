@@ -41,7 +41,7 @@ parser.add_argument("--resampling_steps", type=int, default=0, help="Resample no
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--diffusion_type", type=str, default="LCM")
 parser.add_argument("--from_file", type=str, default=None)
-parser.add_argument("--loss_type", type=str, default="mse")
+parser.add_argument("--loss_type", type=str, default="l2")
 parser.add_argument("--eta", type=float, default=0.2)
 parser.add_argument("--method", type=str, default="new")
 parser.add_argument("--out_dir", type=str, default="test/")
@@ -121,12 +121,6 @@ if args.from_file == None:
     context = compute_embeddings(tokenizer, text_encoder, device, 
                                 batch_size, prompts, sd= False if args.diffusion_type =="LCM" else True)
 
-    
-    
-    #zero_shot(scheduler, unet, vae, latents, context, [args.prompt],device, guidance_scale, \
-    #                    args.diffusion_type, timesteps, args.guide, mask, \
-    #                    mask_index, args.res, args.out_dir +"1.png", \
-    #                    eta=args.eta)
     controller = None
     if args.save_attentions:
         controller = AttentionStore()
@@ -147,15 +141,6 @@ else:
     
     with open(args.from_file, "r") as f:
         data = json.load(f)['image_data']
-        #losses = ["cosine"]
-        #etas = [0.01, 0.02,0.04,0.06,0.08]
-        #for l in range(len(losses)):
-        #    args.loss_type = losses[l]
-        #    for e in etas:
-        #        args.etas = e
-        #        output_dir = f"./test/{args.loss_type}_{e}/"
-        #        os.makedirs(output_dir,exist_ok=True)
-        #        print(f"Generating with loss: {args.loss_type} and eta: {e}")
         output_dir = args.out_dir
         os.makedirs(output_dir, exist_ok=True)
         files = os.listdir(output_dir)
@@ -223,7 +208,7 @@ else:
                         mask_indexes, args.res, filename, \
                         loss_type=args.loss_type, eta=args.eta, glue=args.glue)
                     
-                else:
+                elif args.method == "zero_shot":
                     zero_shot(scheduler, unet, vae, latents, context, [data[i]['caption']],device, guidance_scale, \
                         args.diffusion_type, timesteps, args.guide, masks, \
                         mask_indexes, args.res, filename, \

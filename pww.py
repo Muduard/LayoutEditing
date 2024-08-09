@@ -8,7 +8,7 @@ import json
 from tqdm import tqdm
 from PIL import Image
 MODEL_TYPE = torch.float16
-device = "cuda:1"
+device = "cuda:0"
 batch_size = 1
 
 repo_id = "SimianLuo/LCM_Dreamshaper_v7"#"runwayml/stable-diffusion-v1-5"

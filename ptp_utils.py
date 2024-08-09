@@ -299,7 +299,7 @@ def diffusion_step(unet, scheduler, controller, latents, context, t, guidance_sc
 def register_attention_control(model, controller, attns = None, attnsi = None):
     def ca_forward(self, place_in_unet):
         to_out = self.to_out
-        
+        print(self)
         if type(to_out) is torch.nn.modules.container.ModuleList:
             to_out = self.to_out[0]
         else:

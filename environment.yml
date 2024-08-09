@@ -1,4 +1,4 @@
-name: tesi
+name: LayoutEditing
 channels:
   - pytorch
   - nvidia
